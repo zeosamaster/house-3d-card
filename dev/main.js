@@ -17,7 +17,7 @@ states['sun.sun'] = { entity_id: 'sun.sun', state: sunEl > 0 ? 'above_horizon' :
 // Synthetic status entities (weather, people, energy, car) and a busy house, so the house
 // view's pills and dock have something to show.
 const add = (entity_id, state, attributes = {}) => { states[entity_id] = { entity_id, state, attributes }; };
-add('weather.dev', 'partlycloudy', { temperature: 21.5, friendly_name: 'Weather' });
+add('weather.dev', 'partlycloudy', { temperature: 21.5, friendly_name: 'Weather', wind_speed: Number(new URLSearchParams(location.search).get('wind') ?? 14), wind_speed_unit: 'km/h' });
 add('person.dev_a', 'home', { friendly_name: 'Fabio' });
 add('person.dev_b', 'not_home', { friendly_name: 'Sara' });
 add('sensor.dev_solar', '2.4', { unit_of_measurement: 'kW', device_class: 'power' });

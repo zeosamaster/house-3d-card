@@ -14,6 +14,7 @@ import { ACUnit } from './three/ac.js';
 import { roomGroup, boundsOf } from './plan.js';
 import { createSky } from './sky.js';
 import { createGlows } from './glow.js';
+import { createLife } from './life.js';
 import { lampState } from './hass-map.js';
 import { lightColor } from './three/lights.js';
 
@@ -88,6 +89,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   sky.update();
   // Whole-house view: glowing bulbs + pools of light for every lamp that's on; see glow.js.
   const glows = createGlows(levels, H);
+  // Swaying trees, drifting pool water, rain on the garden; see life.js.
+  const life = createLife(scene, levels);
 
   const target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
@@ -122,6 +125,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     const visible = new Set(topVisible());
     for (const l of levels) l.group.visible = visible.has(l);
     sky.update({ dim: Boolean(room) });
+    life.show(!room);
     scene.environmentIntensity = envFor(sky.daylight) * (room ? 0.8 : 1);
     glows.hide(new Set(units.filter((u) => u.kind === 'light').map((u) => u.id)));
     shadowFrames = 3;
@@ -398,11 +402,13 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
 
   function frame(now) {
     raf = 0;
-    if (orbit && awake === 0 && now - last < 66) { raf = requestAnimationFrame(frame); return; }
+    // the orbit alone draws ~15 fps; rain ~25
+    if ((orbit || life.busy) && awake === 0 && now - last < (life.busy ? 40 : 66)) { raf = requestAnimationFrame(frame); return; }
     const dt = Math.min(0.07, (now - last) / 1000);
     last = now;
     if (orbit) rig.goal.az += dt * ORBIT_DEG_PER_S;
-    const moving = updateRig(dt) || orbit;
+    const moving = updateRig(dt) || orbit || life.busy;
+    life.tick(dt);
     // AO on the frame after things settle (and only then).
     if (moving) { ao.enabled = false; settled = false; } else if (!settled) { settled = true; ao.enabled = true; awake = Math.max(awake, 1); }
     let active = moving;
@@ -532,9 +538,11 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     },
 
     /** Cloud cover 0..1 (from the weather entity). */
-    setWeather(cloud) {
-      if (!sky.update({ cloud, dim: Boolean(room) })) return;
-      shadowFrames = 3;
+    /** cloud 0..1; rain 0 none, 1 rain, 2 pouring; wind 0..1. */
+    setWeather(cloud, { rain = 0, wind = 0 } = {}) {
+      const lively = life.setWeather(rain, wind);
+      if (sky.update({ cloud, dim: Boolean(room) })) shadowFrames = 3;
+      else if (!lively) return;
       wake();
     },
 

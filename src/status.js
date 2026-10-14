@@ -82,6 +82,17 @@ export function cloudOf(state) {
     rainy: 0.85, pouring: 0.95, 'lightning-rainy': 0.95, lightning: 0.85, hail: 0.9, snowy: 0.85, 'snowy-rainy': 0.9 }[state] ?? 0.3;
 }
 
+/** Rain from a weather state: 0 none, 1 rain, 2 pouring. */
+export const rainOf = (state) => ({ rainy: 1, 'snowy-rainy': 1, pouring: 2, 'lightning-rainy': 2 }[state] || 0);
+
+const KMH = { 'km/h': 1, 'm/s': 3.6, mph: 1.609, kn: 1.852 };
+/** Wind 0..1 (calm → gale) from a weather entity's wind_speed. */
+export function windOf(st) {
+  const v = parseFloat(st?.attributes?.wind_speed);
+  if (!Number.isFinite(v)) return 0.2;
+  return Math.min(1, (v * (KMH[st.attributes.wind_speed_unit] ?? 1)) / 45);
+}
+
 const WEATHER = {
   'clear-night': 'mdi:weather-night', cloudy: 'mdi:weather-cloudy', exceptional: 'mdi:alert-circle-outline',
   fog: 'mdi:weather-fog', hail: 'mdi:weather-hail', lightning: 'mdi:weather-lightning',
