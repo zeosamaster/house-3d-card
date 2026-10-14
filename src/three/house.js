@@ -68,19 +68,23 @@ function wallSegments(config) {
   return segments;
 }
 
-export function buildHouse(config, camDir, { plinth: withPlinth = true } = {}) {
+// Walls facing the camera are cut down to a curb so the rooms stay visible. The camera
+// orbits freely, so every exterior wall is built twice (full + curb) and the stage picks
+// one per frame from its outward normal: see `cutaways`.
+export function buildHouse(config, { plinth: withPlinth = true } = {}) {
   const group = new THREE.Group();
   const floors = [];
+  const cutaways = [];
   const H = config.wallHeight;
   const Hi = Math.min(config.interiorWallHeight, H);
   const { minX, minZ, maxX, maxZ } = config.bounds;
 
   // Plinth the model stands on (ground level only).
   if (withPlinth) {
-  const plinth = box(maxX - minX + 0.7, 0.3, maxZ - minZ + 0.7, mat('#141927', { rough: 0.9 }), { r: 0.12 });
-  at(plinth, (minX + maxX) / 2, -0.305, (minZ + maxZ) / 2);
-  plinth.receiveShadow = true;
-  group.add(plinth);
+    const plinth = box(maxX - minX + 0.7, 0.3, maxZ - minZ + 0.7, mat('#141927', { rough: 0.9 }), { r: 0.12 });
+    at(plinth, (minX + maxX) / 2, -0.305, (minZ + maxZ) / 2);
+    plinth.receiveShadow = true;
+    group.add(plinth);
   }
 
   for (const room of config.rooms.filter((r) => !r.rot)) {
@@ -101,65 +105,68 @@ export function buildHouse(config, camDir, { plinth: withPlinth = true } = {}) {
   const frame = mat('#2c3142', { rough: 0.6 });
 
   // A wall piece running from a..b along its axis, between heights y0..y1.
-  const piece = (s, a, b, y0, y1, t, materials = wallMats) => {
+  const piece = (parent, s, a, b, y0, y1, t, materials = wallMats) => {
     const len = b - a;
     const geo = s.axis === 'x' ? new THREE.BoxGeometry(len, y1 - y0, t) : new THREE.BoxGeometry(t, y1 - y0, len);
     const m = new THREE.Mesh(geo, materials);
     const mid = (a + b) / 2;
     m.position.set(s.axis === 'x' ? mid : s.c, (y0 + y1) / 2, s.axis === 'x' ? s.c : mid);
     m.castShadow = m.receiveShadow = true;
-    group.add(m);
+    parent.add(m);
     return m;
   };
 
   for (const s of wallSegments(config)) {
     const exterior = s.kind === 'exterior';
     const t = exterior ? EXT_T : INT_T;
-    // Outward normal of an exterior wall points away from its room.
-    const nx = s.axis === 'z' ? -s.inside : 0;
-    const nz = s.axis === 'x' ? -s.inside : 0;
-    const near = exterior && nx * camDir.x + nz * camDir.z > 0.15;
     const a = s.a - (s.freeA ? EXT_T / 2 : 0);
     const b = s.b + (s.freeB ? EXT_T / 2 : 0);
     const type = s.opening?.type;
 
-    if (near) {
-      if (type !== 'door') piece(s, a, b, 0, CURB, t);
+    if (!exterior) {
+      if (type === 'door' || type === 'open' || type === 'window') continue; // gaps in inner walls
+      piece(group, s, a, b, 0, Hi, t);
+      // Interior walls are drawn cut low, but lamps should still be contained by the
+      // real, full-height wall: an invisible shadow caster fills in the missing part.
+      if (Hi < H) piece(group, s, a, b, Hi, H, 0.04, blocker).receiveShadow = false;
       continue;
     }
-    if (type === 'door' || type === 'open') continue;
 
-    const height = exterior ? H : Hi;
-    if (type === 'window' && exterior) {
+    // Outward normal of an exterior wall points away from its room.
+    const normal = new THREE.Vector3(s.axis === 'z' ? -s.inside : 0, 0, s.axis === 'x' ? -s.inside : 0);
+    const full = new THREE.Group();
+    const curb = new THREE.Group();
+    curb.visible = false; // the stage flips these as the camera turns
+    group.add(full, curb);
+    cutaways.push({ normal, full, curb });
+    if (type === 'open') continue;
+    if (type !== 'door') piece(curb, s, a, b, 0, CURB, t);
+    if (type === 'door') continue;
+    if (type === 'window') {
       const { sill, head } = s.opening;
-      piece(s, a, b, 0, sill, t);
-      piece(s, a, b, Math.min(head, H), H, t);
-      const pane = piece(s, a, b, sill, head, 0.03, glass);
+      if (sill > 0.01) piece(full, s, a, b, 0, sill, t);
+      piece(full, s, a, b, Math.min(head, H), H, t);
+      const pane = piece(full, s, a, b, sill, head, 0.03, glass);
       pane.castShadow = false;
       const fw = 0.05;
       const bars = [[a, a + fw, sill, head], [b - fw, b, sill, head], [a, b, sill, sill + fw], [a, b, head - fw, head]];
       if (b - a > 1.2) bars.push([(a + b) / 2 - fw / 2, (a + b) / 2 + fw / 2, sill, head]);
-      for (const [fa, fb, y0, y1] of bars) piece(s, fa, fb, y0, y1, 0.07, frame);
+      for (const [fa, fb, y0, y1] of bars) piece(full, s, fa, fb, y0, y1, 0.07, frame);
       continue;
     }
-    if (type === 'window') continue; // a window in an interior wall is just a gap
-
-    piece(s, a, b, 0, height, t);
-    // Interior walls are drawn cut low, but lamps should still be contained by the
-    // real, full-height wall: an invisible shadow caster fills in the missing part.
-    if (!exterior && Hi < H) piece(s, a, b, Hi, H, 0.04, blocker).receiveShadow = false;
+    piece(full, s, a, b, 0, H, t);
   }
 
   for (const room of config.rooms.filter((r) => r.rot)) {
-    floors.push(rotatedRoom(room, config, camDir, group, wallMats));
+    floors.push(rotatedRoom(room, config, group, wallMats, cutaways));
   }
 
-  return { group, floors };
+  return { group, floors, cutaways };
 }
 
 // A room turned about its centre: its own floor and four exterior walls (no openings),
 // sitting a hair above any axis-aligned floor it overlaps.
-function rotatedRoom(room, config, camDir, parent, wallMats) {
+function rotatedRoom(room, config, parent, wallMats, cutaways) {
   const H = config.wallHeight;
   const g = new THREE.Group();
   g.position.set(room.x + room.w / 2, 0.004, room.z + room.d / 2);
@@ -171,20 +178,21 @@ function rotatedRoom(room, config, camDir, parent, wallMats) {
   g.add(floor);
   if (room.outdoor) return floor;
 
-  const n = new THREE.Vector3();
   const sides = [
     [0, -room.d / 2, room.w, 0, -1], [0, room.d / 2, room.w, 0, 1],
     [-room.w / 2, 0, room.d, -1, 0], [room.w / 2, 0, room.d, 1, 0],
   ];
+  const wall = (len, h, along) => new THREE.Mesh(
+    along ? new THREE.BoxGeometry(len + EXT_T, h, EXT_T) : new THREE.BoxGeometry(EXT_T, h, len + EXT_T), wallMats);
   for (const [x, z, len, nx, nz] of sides) {
-    n.set(nx, 0, nz).applyAxisAngle(new THREE.Vector3(0, 1, 0), g.rotation.y);
-    const h = n.dot(camDir) > 0.15 ? CURB : H;
-    const along = nz !== 0;
-    const geo = along ? new THREE.BoxGeometry(len + EXT_T, h, EXT_T) : new THREE.BoxGeometry(EXT_T, h, len + EXT_T);
-    const m = new THREE.Mesh(geo, wallMats);
-    m.position.set(x, h / 2, z);
-    m.castShadow = m.receiveShadow = true;
-    g.add(m);
+    const normal = new THREE.Vector3(nx, 0, nz).applyAxisAngle(new THREE.Vector3(0, 1, 0), g.rotation.y);
+    const full = wall(len, H, nz !== 0);
+    const curb = wall(len, CURB, nz !== 0);
+    full.position.set(x, H / 2, z);
+    curb.position.set(x, CURB / 2, z);
+    curb.visible = false;
+    for (const m of [full, curb]) { m.castShadow = m.receiveShadow = true; g.add(m); }
+    cutaways.push({ normal, full, curb });
   }
   return floor;
 }

@@ -26,11 +26,12 @@ With no `plan` yet, the card lays out a rough starter house from your HA floors 
 | Do this | To get this |
 | --- | --- |
 | Tap a room (or its label) | Fly into it; its devices open in the side sheet |
-| Storey chips | Peel the house down to one storey |
+| Storey chips | Pick the storey to show (starts on the ground floor; the top one shows the whole house) |
+| **Aa** | Show / hide room names (off by default, remembered per device) |
 | Tap a lamp in a room | Toggle it |
 | Long-press a lamp / tap an AC | Home Assistant's device dialog |
 | `← Casa`, Back | Back to the whole house (the room is in the URL: `#room=sala`) |
-| Drag / pinch / scroll | Orbit / zoom |
+| Drag / pinch / scroll | Orbit all the way round / zoom — walls facing you are cut away as you turn |
 
 ## Editing
 
@@ -73,9 +74,11 @@ plan:
       rooms: []
 ```
 
-Outdoor rooms (`outdoor: true`) have no walls and take `grass`, `deck`, `paving`, `water` or `stone`. A storey's `elevation` defaults to stacking on the one below.
+Outdoor rooms (`outdoor: true`) have no walls and take `grass`, `deck`, `paving`, `tile`, `stone`, `water` or `soil`. A storey's `elevation` defaults to stacking on the one below.
 
 - **Rooms sharing an `area`** on a storey act as one room: no wall between them, one label, one room view. Use it for L-shapes and split zones.
+- **Furniture** includes a `car` (a Tesla Model Y-ish crossover, `color`), for the driveway.
+- **`camera.azimuth`** sets the starting view (e.g. `-45` puts the house's +x side top-right).
 - **`rot`** (degrees) turns a room about its rect's centre. A rotated room builds its own four walls and ignores openings. Where it overlaps axis-aligned rooms, its floor wins; put `type: open` openings on their edges to drop walls it replaces.
 
 ## Development

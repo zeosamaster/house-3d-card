@@ -144,6 +144,24 @@ function water() {
   });
 }
 
+function soil() {
+  return canvasTexture(512, (g, s) => {
+    const rand = rng(11);
+    g.fillStyle = '#5a4030';
+    g.fillRect(0, 0, s, s);
+    const rows = 6;
+    for (let r = 0; r < rows; r++) {
+      const y = (r + 0.5) * (s / rows);
+      g.fillStyle = 'rgba(0,0,0,0.25)';
+      g.fillRect(0, y - 6, s, 12);
+      for (let x = 10; x < s; x += 26 + rand() * 10) {
+        g.fillStyle = shade('#4f8a3a', (rand() - 0.5) * 0.15);
+        g.beginPath(); g.arc(x, y - 14, 7 + rand() * 4, 0, Math.PI * 2); g.fill();
+      }
+    }
+  });
+}
+
 const FLOORS = {
   oak: () => planks('#c7a47c'),
   walnut: () => planks('#94705a'),
@@ -154,6 +172,7 @@ const FLOORS = {
   deck: () => planks('#8a6f55'),
   paving: () => tiles('#b9b3a8', 2, '#8f8a80'),
   water,
+  soil,
 };
 
 export const FLOOR_KINDS = Object.keys(FLOORS);

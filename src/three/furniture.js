@@ -63,6 +63,45 @@ function doorLines(width, height, y, z, count, material) {
 }
 
 const builders = {
+
+  // A Tesla Model Y-ish crossover: extruded side profile, glass greenhouse, four wheels.
+  car({ color = '#e8e8ea' }) {
+    const W = 1.92;
+    const side = (pts, width, bevel) => {
+      const shape = new THREE.Shape();
+      shape.moveTo(...pts[0]);
+      for (const p of pts.slice(1)) shape.lineTo(...p);
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3,
+      });
+      geo.translate(0, 0, -(width - bevel * 2) / 2);
+      geo.rotateY(-Math.PI / 2); // profile x (rear→front) runs along +z
+      return geo;
+    };
+    const paint = mat(color, { rough: 0.32, metal: 0.25 });
+    const body = new THREE.Mesh(side([
+      [-2.3, 0.3], [-2.36, 0.48], [-2.33, 0.86], [-2.12, 1.02], [0.95, 1.02], [1.6, 0.95], [2.15, 0.86],
+      [2.33, 0.68], [2.34, 0.42], [2.22, 0.3],
+    ], W, 0.07), paint);
+    const glass = new THREE.Mesh(side([
+      [-2.02, 1.0], [-1.55, 1.3], [-1.05, 1.52], [-0.55, 1.6], [0.15, 1.6], [0.55, 1.42], [0.98, 1.0],
+    ], W - 0.3, 0.08), mat('#151a24', { rough: 0.12, metal: 0.6 }));
+    const parts = [body, glass];
+    const tire = mat('#121316', { rough: 0.9 });
+    const rim = mat('#9aa0a8', { rough: 0.35, metal: 0.8 });
+    for (const z of [-1.45, 1.45]) {
+      for (const x of [-0.84, 0.84]) {
+        const t = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.26, 28), tire);
+        const r = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.27, 20), rim);
+        for (const w of [t, r]) { w.rotation.z = Math.PI / 2; w.position.set(x, 0.36, z); parts.push(w); }
+      }
+    }
+    parts.push(
+      at(box(1.5, 0.035, 0.04, mat('#ffffff', { emissive: '#dfe8ff', emissiveIntensity: 0.6 }), { r: 0.01 }), 0, 0.78, 2.33),
+      at(box(1.6, 0.04, 0.04, mat('#5a0d10', { emissive: '#ff2b2b', emissiveIntensity: 0.5 }), { r: 0.01 }), 0, 0.92, -2.36),
+    );
+    return group(parts);
+  },
   rug({ size = [2, 1.4], color = '#3b4a66' }) {
     const g = group(
       at(box(size[0], 0.016, size[1], mat(color, { rough: 1 }), { r: 0.006 }), 0, 0, 0),
@@ -339,6 +378,7 @@ export function footprint(item) {
     case 'kitchen': return [w || 3, 0.62];
     case 'fridge': return [0.7, 0.68];
     case 'bed': return [(w || 1.6) + 0.1, 2.14];
+    case 'car': return [1.95, 4.75];
     case 'nightstand': return [0.46, 0.4];
     case 'dresser': return [w || 1.3, 0.45];
     case 'plant': return [0.45, 0.45];

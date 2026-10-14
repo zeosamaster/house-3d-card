@@ -4,7 +4,7 @@
 export const LIGHT_TYPES = ['ceiling', 'pendant', 'spots', 'floor', 'table', 'strip'];
 export const WALLS = ['north', 'south', 'east', 'west'];
 export const INDOOR_FLOORS = ['oak', 'walnut', 'tile', 'stone'];
-export const OUTDOOR_FLOORS = ['grass', 'deck', 'paving', 'water', 'stone'];
+export const OUTDOOR_FLOORS = ['grass', 'deck', 'paving', 'tile', 'stone', 'water', 'soil'];
 
 export class PlanError extends Error {}
 

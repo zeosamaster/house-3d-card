@@ -4,7 +4,7 @@ import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups } from './hass-map.js';
 import './editor.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -18,11 +18,13 @@ class House3DCard extends LitElement {
     _editing: { state: true },
     _sheet: { state: true },
     _toast: { state: true },
+    _showLabels: { state: true },
   };
 
   constructor() {
     super();
     this._labels = [];
+    this._showLabels = readPref('labels') === '1';
     this._tiles = new Map();
     this._watched = new Map();
     this._onHash = () => this._fromHash();
@@ -89,6 +91,10 @@ class House3DCard extends LitElement {
       return;
     }
     this._resizeObs.observe(host);
+    // Start on the ground storey; the chips peel up to the others.
+    const levels = [...this._plan.levels].sort((a, b) => a.elevation - b.elevation);
+    if (!levels.some((l) => l.id === this._peel)) this._peel = levels[0].id;
+    this._stage.setPeel(levels.length > 1 ? this._peel : null);
     this._stage.setRunning(this.isConnected && !document.hidden);
     this._fromHash(true);
     this._updateLabels();
@@ -252,18 +258,18 @@ class House3DCard extends LitElement {
       <div class="wrap ${this._room ? 'has-sheet' : ''}" style="height:${this._config.height || 'calc(100vh - var(--header-height, 56px) - 16px)'}">
         <div class="stage">
           <div class="canvas"></div>
-          ${this._room ? nothing : this._labels.map((l) => html`
+          ${this._room || !this._showLabels ? nothing : this._labels.map((l) => html`
             <button class="label" style="left:${l.x}px;top:${l.y}px" @click=${() => this._focus(l.id)}>${l.name}</button>`)}
           <div class="bar">
             ${this._room ? html`
               <button class="chip back" @click=${() => this._back()}>← ${plan?.name || 'Casa'}</button>
               <span class="title">${this._room.name}</span>` : html`
               <span class="title">${plan?.name || 'Casa'}</span>
-              ${levels.length > 1 ? html`
-                <button class="chip ${this._peel ? '' : 'on'}" @click=${() => this._setPeel(null)}>Tudo</button>
-                ${levels.map((l) => html`
-                  <button class="chip ${this._peel === l.id ? 'on' : ''}" @click=${() => this._setPeel(l.id)}>${l.name}</button>`)}` : nothing}`}
+              ${levels.length > 1 ? levels.map((l) => html`
+                <button class="chip ${this._peel === l.id ? 'on' : ''}" @click=${() => this._setPeel(l.id)}>${l.name}</button>`) : nothing}`}
             <span class="grow"></span>
+            ${this._room ? nothing : html`<button class="chip icon ${this._showLabels ? 'on' : ''}" title="Room names"
+              @click=${() => this._toggleLabels()}>Aa</button>`}
             ${admin ? html`<button class="chip icon" title="Edit house" @click=${() => { this._editing = true; }}>✎</button>` : nothing}
           </div>
           ${this._error ? html`<div class="error"><b>Can't show the house</b><p>${this._error}</p></div>` : nothing}
@@ -285,6 +291,11 @@ class House3DCard extends LitElement {
         <house-3d-editor .hass=${this.hass} .plan=${structuredClone(this._rawPlan)}
           .save=${(p) => this._save(p)} @close=${() => { this._editing = false; }}></house-3d-editor>` : nothing}
     `;
+  }
+
+  _toggleLabels() {
+    this._showLabels = !this._showLabels;
+    writePref('labels', this._showLabels ? '1' : '0');
   }
 
   _setPeel(id) {
@@ -328,6 +339,14 @@ class House3DCard extends LitElement {
       .sheet { width: auto; flex: 1; }
     }
   `;
+}
+
+// Per-viewer UI preferences; storage can be unavailable (private mode, previews).
+function readPref(key) {
+  try { return localStorage.getItem(`house-3d-card.${key}`); } catch { return null; }
+}
+function writePref(key, value) {
+  try { localStorage.setItem(`house-3d-card.${key}`, value); } catch { /* not persisted */ }
 }
 
 function findCard(node) {

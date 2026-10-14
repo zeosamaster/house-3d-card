@@ -14,7 +14,6 @@ import { roomGroup } from './plan.js';
 export const STAGE_BG = '#0a0e1a';
 const rad = THREE.MathUtils.degToRad;
 const clamp = THREE.MathUtils.clamp;
-const ORBIT_AZ = 60;
 const EL_MIN = 22;
 const EL_MAX = 75;
 const ZOOM_MIN = 0.35;
@@ -46,10 +45,10 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
   const levels = plan.levels.map((cfg, i) => {
     const group = new THREE.Group();
     group.position.y = cfg.elevation;
-    const house = buildHouse(cfg, camDir, { plinth: false });
+    const house = buildHouse(cfg, { plinth: false });
     group.add(house.group, buildFurniture(cfg.furniture));
     scene.add(group);
-    return { cfg, group, floors: house.floors, index: i };
+    return { cfg, group, floors: house.floors, cutaways: house.cutaways, index: i };
   });
   const levelOf = (id) => levels.find((l) => l.cfg.id === id);
   const roomOf = (levelId, roomId) => levelOf(levelId)?.cfg.rooms.find((r) => r.id === roomId);
@@ -171,7 +170,26 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
     basis(rig.az, rig.el);
     camera.position.copy(rig.target).addScaledVector(fwd, -rig.dist);
     camera.lookAt(rig.target);
+    cutaway();
     return delta > 0.002;
+  }
+
+  // Exterior walls facing the camera drop to a curb; re-picked whenever the camera turns.
+  const toCamera = new THREE.Vector3();
+  let cutAz = null;
+  function cutaway() {
+    const az = Math.round(rig.az);
+    if (az === cutAz) return;
+    cutAz = az;
+    toCamera.set(Math.sin(rad(rig.az)), 0, Math.cos(rad(rig.az)));
+    let changed = false;
+    for (const l of levels) {
+      for (const c of l.cutaways) {
+        const near = c.normal.dot(toCamera) > 0.15;
+        if (c.curb.visible !== near) { c.curb.visible = near; c.full.visible = !near; changed = true; }
+      }
+    }
+    if (changed) shadowFrames = Math.max(shadowFrames, 2);
   }
 
   /* ---------- room units ---------- */
@@ -253,7 +271,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
     const dy = ev.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) > 6) { drag.moved = true; clearTimeout(press?.timer); }
     if (drag.moved) {
-      rig.goal.az = clamp(drag.az - dx * 0.35, baseAz - ORBIT_AZ, baseAz + ORBIT_AZ);
+      rig.goal.az = drag.az - dx * 0.35; // orbit all the way round
       rig.goal.el = clamp(drag.el + dy * 0.3, EL_MIN, EL_MAX);
       frameGoal();
       wake();
