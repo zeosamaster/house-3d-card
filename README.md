@@ -28,6 +28,9 @@ With no `plan` yet, the card lays out a rough starter house from your HA floors 
 | Tap a room (or its label) | Fly into it; its devices open in the side sheet |
 | Room pills | Show up when something's going on: lights on, AC running (mode + target), a door/window open (red) |
 | Dock (bottom) | Weather, who's home, solar / battery / house load — tap for details |
+| 💡 *n* (top bar) | Every light off at once — **Undo** in the toast brings back exactly what was on (a throwaway `scene.house_3d_undo` snapshot) |
+| 💡 in a room pill | That room's lights off (with Undo) |
+| Lights bar in a room's sheet | All of the room's lamps on / off |
 | Storey chips | Pick the storey to show (starts on the ground floor; the top one shows the whole house) |
 | **Aa** | Show / hide room names (off by default, remembered per device) |
 | Tap a lamp in a room | Toggle it |
