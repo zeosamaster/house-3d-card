@@ -52,6 +52,7 @@ The room sheet follows the hide/order curation of your Areas dashboard (`areas_d
 | `status` | weather/people auto | Dock entities: `weather`, `people` (list), `solar`, `battery`, `load` |
 | `car` | — | Chip over the plan's `car`: `battery` (%), `charging` (sensor or binary_sensor) |
 | `sun` | `sun.sun` | Drives the light and sky |
+| `idle_orbit` | `180` | Seconds without a touch before the house view slowly orbits (wall tablets); `false` turns it off |
 | `areas_dashboard` | `dashboard-areas` | Areas dashboard whose curation the room sheet uses |
 | `height` | `calc(100vh - var(--header-height) - 16px)` | Card height |
 | `dashboard` | from the URL | Dashboard url_path the editor saves into |
@@ -85,6 +86,7 @@ plan:
 Outdoor rooms (`outdoor: true`) have no walls and take `grass`, `deck`, `paving`, `tile`, `stone`, `water` or `soil`. A storey's `elevation` defaults to stacking on the one below.
 
 - **Rooms sharing an `area`** on a storey act as one room: no wall between them, one label, one room view. Use it for L-shapes and split zones.
+- **Openings** take `sensor:` (a door/window `binary_sensor`): a red frame lights up on the model while it's open. **A `tv`** takes `entity:` (a `media_player`): its screen lights up while it's on.
 - **Furniture** includes a `car` (a Tesla Model Y-ish crossover, `color`), for the driveway. Any piece takes `scale` (e.g. `0.55`).
 - **`north`** — the plan direction `[x, z]` that faces real north (default `[0, -1]`, up the plan). The sun (from `sun.sun`, or the card's `sun:` option) lights the house from where it really is, with a matching sky; after dusk a soft moon takes over and lit lamps glow in the whole-house view.
 - **`camera.azimuth`** sets the starting view (e.g. `-45` puts the house's +x side top-right).

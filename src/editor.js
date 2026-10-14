@@ -387,6 +387,14 @@ class HouseEditor extends LitElement {
     return [[null, '— none —'], ...keep(inArea).map((e) => [e, `★ ${name(this.hass, e)}`]), ...keep(rest).map((e) => [e, name(this.hass, e)])];
   }
 
+  // The area of a room the opening sits on (its sensor list starts with that area's sensors).
+  _openingArea(o) {
+    const mid = [(o.from[0] + o.to[0]) / 2, (o.from[1] + o.to[1]) / 2];
+    const near = this.level.rooms.find((r) => !r.outdoor && mid[0] >= r.rect[0] - 0.05 && mid[0] <= r.rect[0] + r.rect[2] + 0.05
+      && mid[1] >= r.rect[1] - 0.05 && mid[1] <= r.rect[1] + r.rect[3] + 0.05);
+    return near?.area;
+  }
+
   _placedEntities() {
     return new Set(this.plan.levels.flatMap((l) => [...l.lights, ...l.acs].map((d) => d.entity)).filter(Boolean));
   }
@@ -503,6 +511,8 @@ class HouseEditor extends LitElement {
           ${this._field('Sill', item.sill ?? 0.85, (v) => { item.sill = v; }, { type: 'number', step: STEP })}
           ${this._field('Head', item.head ?? 2.1, (v) => { item.head = v; }, { type: 'number', step: STEP })}</div>` : nothing}
         <button @click=${rotate}>Rotate 90°</button>
+        ${this._select('Sensor', item.sensor, this._entityOptions(['binary_sensor'], this._openingArea(item),
+          (e) => ['door', 'window', 'opening', 'garage_door'].includes(this.hass.states[e]?.attributes?.device_class)), (v) => { item.sensor = v || undefined; })}
         ${del}`;
     }
     if (sel.kind === 'furniture') {
@@ -514,6 +524,7 @@ class HouseEditor extends LitElement {
           ${this._field('Width', item.width ?? '', (v) => { item.width = v || undefined; }, { type: 'number', step: STEP })}
         </div>
         ${this._field('Colour', item.color ?? '#8b93a7', (v) => { item.color = v; }, { type: 'color' })}
+        ${item.type === 'tv' ? this._select('TV entity', item.entity, this._entityOptions(['media_player'], null), (v) => { item.entity = v || undefined; }) : nothing}
         ${this._field('Scale', item.scale ?? 1, (v) => { item.scale = v && v !== 1 ? v : undefined; }, { type: 'number', step: 0.05 })}
         ${del}`;
     }

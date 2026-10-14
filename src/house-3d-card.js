@@ -5,7 +5,7 @@ import { lampState, lampCaps, acState, areaGroups, isOn } from './hass-map.js';
 import { roomStatus, dockStatus, carStatus, fmt } from './status.js';
 import './editor.js';
 
-const VERSION = '0.7.0';
+const VERSION = '0.8.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -45,8 +45,22 @@ class House3DCard extends LitElement {
   getCardSize() { return 12; }
   static getStubConfig() { return {}; }
 
+  // Idle showcase: after `idle_orbit` seconds without a touch (default 180, false = off) the
+  // house view slowly orbits — meant for the always-on kitchen tablet.
+  _poke() {
+    this._stage?.setIdleOrbit(false);
+    clearTimeout(this._idleTimer);
+    const secs = this._config?.idle_orbit ?? 180;
+    if (!secs) return;
+    this._idleTimer = setTimeout(() => {
+      if (!this._room && !this._editing && !document.hidden) this._stage?.setIdleOrbit(true);
+    }, secs * 1000);
+  }
+
   connectedCallback() {
     super.connectedCallback();
+    this._onPoke ??= () => this._poke();
+    for (const ev of ['pointerdown', 'wheel', 'keydown']) this.addEventListener(ev, this._onPoke, { passive: true });
     window.addEventListener('popstate', this._onHash);
     document.addEventListener('visibilitychange', this._onVisibility);
     this._resizeObs ??= new ResizeObserver(() => { this._stage?.resize(); this._updateLabels(); });
@@ -55,6 +69,8 @@ class House3DCard extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    clearTimeout(this._idleTimer);
+    for (const ev of ['pointerdown', 'wheel', 'keydown']) this.removeEventListener(ev, this._onPoke);
     window.removeEventListener('popstate', this._onHash);
     document.removeEventListener('visibilitychange', this._onVisibility);
     this._stage?.setRunning(false);
@@ -96,7 +112,10 @@ class House3DCard extends LitElement {
       return;
     }
     this._glowIds = null;
+    this._liveIds = null;
     this._syncHouse(true);
+    this._syncLive(true);
+    this._poke();
     this._resizeObs.observe(host);
     // Start on the ground storey; the chips peel up to the others.
     const levels = [...this._plan.levels].sort((a, b) => a.elevation - b.elevation);
@@ -122,6 +141,7 @@ class House3DCard extends LitElement {
   }
 
   _focus(id, { push = true } = {}) {
+    this._poke();
     const found = id ? this._roomCfg(id) : null;
     if (!found) this._sheetBig = false;
     this._room = found ? { id, level: found.level.id, name: found.room.name, area: found.room.area } : null;
@@ -222,9 +242,19 @@ class House3DCard extends LitElement {
     this._stage.applyGlows((cfg) => lampState(this.hass.states[cfg.entity]));
   }
 
+  // Contact sensors on openings and TVs: only when one of them changed.
+  _syncLive(force = false) {
+    if (!this._stage || !this.hass) return;
+    const ids = this._liveIds ??= this._stage.liveEntities();
+    if (!force && ids.every((e) => this._liveSeen?.get(e) === this.hass.states[e])) return;
+    this._liveSeen = new Map(ids.map((e) => [e, this.hass.states[e]]));
+    this._stage.applyLive((e) => this.hass.states[e]);
+  }
+
   // Push live state into the focused room's lamps/ACs, only when one of them changed.
   _syncStates() {
     this._syncHouse();
+    this._syncLive();
     if (!this._stage || !this._room || !this.hass) return;
     const lv = this._plan.levels.find((l) => l.id === this._room.level);
     const rooms = roomGroup(lv, this._room.id).map((r) => r.id);

@@ -27,8 +27,12 @@ add('sensor.dev_car_battery', '54', { unit_of_measurement: '%' });
 add('sensor.dev_car_charging', 'charging');
 const ac = Object.keys(states).find((e) => e.startsWith('climate.ac_sala'));
 if (ac) states[ac] = { ...states[ac], state: 'cool', attributes: { ...states[ac].attributes, temperature: 23, current_temperature: 25.5 } };
-const win = Object.keys(states).find((e) => e.startsWith('binary_sensor.') && ['window', 'door'].includes(states[e].attributes.device_class));
-if (win) states[win] = { ...states[win], state: 'on' };
+// Open a door and a window (if they exist in the fixture) and switch a TV on.
+const opened = Object.keys(states).filter((e) => e.startsWith('binary_sensor.') && ['window', 'door'].includes(states[e].attributes.device_class))
+  .filter((e) => /sala_mesa|w6_cozinha/.test(e));
+for (const e of opened.length ? opened : Object.keys(states).filter((x) => states[x].attributes?.device_class === 'window').slice(0, 1)) states[e] = { ...states[e], state: 'on' };
+const tv = Object.keys(states).find((e) => e.startsWith('media_player.') && /tv/.test(e));
+if (tv) states[tv] = { ...states[tv], state: 'on' };
 
 const scenes = {};
 let hass = {

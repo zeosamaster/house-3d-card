@@ -43,7 +43,7 @@ export function normalizePlan(raw) {
     const openings = (lv.openings || []).map((o, i) => {
       need(isPoint(o.from) && isPoint(o.to), `${where}: opening #${i + 1} needs "from" and "to"`);
       need(o.from[0] === o.to[0] || o.from[1] === o.to[1], `${where}: opening #${i + 1} must be axis-aligned`);
-      return { type: o.type || 'door', from: o.from, to: o.to, sill: o.sill ?? 0.85, head: o.head ?? 2.1 };
+      return { type: o.type || 'door', from: o.from, to: o.to, sill: o.sill ?? 0.85, head: o.head ?? 2.1, sensor: o.sensor || null };
     });
     const lights = (lv.lights || []).map((l, i) => {
       const id = l.id || l.entity || `${lv.id}.light${i + 1}`;
