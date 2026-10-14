@@ -89,9 +89,14 @@ export function buildHouse(config, { plinth: withPlinth = true } = {}) {
     group.add(plinth);
   }
 
+  const glowFloors = [];
   for (const room of config.rooms.filter((r) => !r.rot)) {
     const floor = floorMesh(room, room.floor);
     floor.userData = { kind: 'room', id: room.id, level: config.levelId };
+    if (room.glow) {
+      floor.material = floor.material.clone(); // its own, so only this floor takes the light's colour
+      glowFloors.push({ entity: room.glow, material: floor.material });
+    }
     floors.push(floor);
     group.add(floor);
   }
@@ -195,7 +200,7 @@ export function buildHouse(config, { plinth: withPlinth = true } = {}) {
     alerts.push({ sensor: o.sensor, mesh: frameG });
   }
 
-  return { group, floors, cutaways, windows, alerts };
+  return { group, floors, cutaways, windows, alerts, glowFloors };
 }
 
 // A room turned about its centre: its own floor and four exterior walls (no openings),

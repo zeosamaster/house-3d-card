@@ -33,6 +33,7 @@ With no `plan` yet, the card lays out a rough starter house from your HA floors 
 | Lights bar in a room's sheet | All of the room's lamps on / off |
 | Storey chips | Pick the storey to show (starts on the ground floor; the top one shows the whole house) |
 | **Aa** | Show / hide room names (off by default, remembered per device) |
+| 🌡 | Temperature layer: every room's floor tinted cold-blue → comfortable-green → amber → hot-red, temperatures in the pills (area's temperature sensor, else any in the area, else its AC's reading; outdoors only an explicitly chosen area sensor) |
 | Tap a lamp in a room | Toggle it |
 | Long-press a lamp / tap an AC | Home Assistant's device dialog |
 | `← Casa`, Back | Back to the whole house (the room is in the URL: `#room=sala`) |
@@ -51,7 +52,7 @@ The room sheet follows the hide/order curation of your Areas dashboard (`areas_d
 | `plan` | starter layout from your areas | The house — written by the editor |
 | `status` | weather/people auto | Dock entities: `weather`, `people` (list), `solar`, `battery`, `load` |
 | `car` | — | Chip over the plan's `car`: `battery` (%), `charging` (sensor or binary_sensor) |
-| `sun` | `sun.sun` | Drives the light and sky |
+| `sun` | `sun.sun` | Drives the light and sky (cloud cover from the `status.weather` entity greys it) |
 | `idle_orbit` | `180` | Seconds without a touch before the house view slowly orbits (wall tablets); `false` turns it off |
 | `areas_dashboard` | `dashboard-areas` | Areas dashboard whose curation the room sheet uses |
 | `height` | `calc(100vh - var(--header-height) - 16px)` | Card height |
@@ -86,6 +87,7 @@ plan:
 Outdoor rooms (`outdoor: true`) have no walls and take `grass`, `deck`, `paving`, `tile`, `stone`, `water` or `soil`. A storey's `elevation` defaults to stacking on the one below.
 
 - **Rooms sharing an `area`** on a storey act as one room: no wall between them, one label, one room view. Use it for L-shapes and split zones.
+- **Rooms** take `glow:` (a light): at night the floor takes that light's colour — e.g. a pool's water and its pool light.
 - **Openings** take `sensor:` (a door/window `binary_sensor`): a red frame lights up on the model while it's open. **A `tv`** takes `entity:` (a `media_player`): its screen lights up while it's on.
 - **Furniture** includes a `car` (a Tesla Model Y-ish crossover, `color`), for the driveway. Any piece takes `scale` (e.g. `0.55`).
 - **`north`** — the plan direction `[x, z]` that faces real north (default `[0, -1]`, up the plan). The sun (from `sun.sun`, or the card's `sun:` option) lights the house from where it really is, with a matching sky; after dusk a soft moon takes over and lit lamps glow in the whole-house view.

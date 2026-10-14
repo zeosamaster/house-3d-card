@@ -35,8 +35,61 @@ export function roomStatus(hass, level, roomId) {
     .map((st) => ({ mode: st.state, target: st.attributes.temperature, current: st.attributes.current_temperature }));
   const open = area ? (openingsByArea(hass).get(area) || []).filter((id) => hass.states[id]?.state === 'on')
     .map((id) => ({ id, kind: hass.states[id].attributes.device_class === 'window' ? 'window' : 'door' })) : [];
-  const t = area && num(hass.states[hass.areas?.[area]?.temperature_entity_id]);
-  return { lightsOn, acs, open, temp: t, busy: lightsOn > 0 || acs.length > 0 || open.length > 0 };
+  return { lightsOn, acs, open, temp: roomTemp(hass, level, ids, area), busy: lightsOn > 0 || acs.length > 0 || open.length > 0 };
+}
+
+// Temperature sensors by area (registry-based), rebuilt with the entity registry.
+let tempIndex = { entities: null, byArea: new Map() };
+function tempsByArea(hass) {
+  if (tempIndex.entities === hass.entities) return tempIndex.byArea;
+  const byArea = new Map();
+  for (const [id, e] of Object.entries(hass.entities || {})) {
+    if (!id.startsWith('sensor.') || e.hidden || e.entity_category) continue;
+    if (hass.states[id]?.attributes?.device_class !== 'temperature') continue;
+    const area = entityArea(hass, id);
+    if (!area) continue;
+    if (!byArea.has(area)) byArea.set(area, []);
+    byArea.get(area).push(id);
+  }
+  tempIndex = { entities: hass.entities, byArea };
+  return byArea;
+}
+
+/** The room's temperature: the area's chosen sensor, else any working temperature sensor in
+ *  the area, else the room's AC's own reading. */
+export function roomTemp(hass, level, ids, area) {
+  const chosen = area && num(hass.states[hass.areas?.[area]?.temperature_entity_id]);
+  if (chosen != null) return chosen;
+  // Outdoors, "any sensor in the area" picks up things like a car's cabin; only an explicit choice counts.
+  if (level.rooms.some((r) => ids.has(r.id) && r.outdoor)) return null;
+  for (const id of (area && tempsByArea(hass).get(area)) || []) {
+    const v = num(hass.states[id]);
+    if (v != null) return v;
+  }
+  for (const a of level.acs.filter((x) => ids.has(x.room) && x.entity)) {
+    const v = hass.states[a.entity]?.attributes?.current_temperature;
+    if (Number.isFinite(v)) return v;
+  }
+  return null;
+}
+
+// Heat-map colour for a temperature: blue (cold) → green (comfortable) → amber → red (hot).
+const STOPS = [[17, [79, 140, 255]], [20.5, [70, 195, 154]], [23.5, [242, 193, 78]], [27, [255, 92, 61]]];
+export function heatColor(t) {
+  if (t == null) return null;
+  if (t <= STOPS[0][0]) return STOPS[0][1];
+  for (let i = 0; i < STOPS.length - 1; i++) {
+    const [t0, c0] = STOPS[i];
+    const [t1, c1] = STOPS[i + 1];
+    if (t <= t1) { const k = (t - t0) / (t1 - t0); return c0.map((v, j) => Math.round(v + (c1[j] - v) * k)); }
+  }
+  return STOPS[STOPS.length - 1][1];
+}
+
+/** Cloud cover 0..1 from a weather state, for the sky. */
+export function cloudOf(state) {
+  return { sunny: 0, 'clear-night': 0, partlycloudy: 0.35, windy: 0.2, 'windy-variant': 0.45, cloudy: 0.7, fog: 0.8,
+    rainy: 0.85, pouring: 0.95, 'lightning-rainy': 0.95, lightning: 0.85, hail: 0.9, snowy: 0.85, 'snowy-rainy': 0.9 }[state] ?? 0.3;
 }
 
 const WEATHER = {

@@ -60,14 +60,25 @@ export function createSky(scene, center, span) {
     setNorth([x, z]) { north = new THREE.Vector2(x, z).normalize(); last = null; },
 
     /** Returns true when anything visible changed (the caller re-renders + redraws shadows). */
-    update({ elevation = sky.elevation, azimuth = sky.azimuth, dim = false } = {}) {
-      const key = `${elevation.toFixed(1)}|${azimuth.toFixed(1)}|${dim}`;
+    cloud: 0,
+
+    update({ elevation = sky.elevation, azimuth = sky.azimuth, dim = false, cloud = sky.cloud } = {}) {
+      const key = `${elevation.toFixed(1)}|${azimuth.toFixed(1)}|${dim}|${cloud.toFixed(2)}`;
       if (key === last) return false;
       last = key;
       sky.elevation = elevation;
       sky.azimuth = azimuth;
+      sky.cloud = cloud;
       sky.daylight = smooth(-6, 8, elevation);
       const s = sample(elevation);
+      // Clouds: a greyer, flatter sky and a softer sun (shadows fade, ambient carries more).
+      if (cloud > 0) {
+        const grey = new THREE.Color('#8f98a6').multiplyScalar(0.35 + 0.65 * smooth(-6, 12, elevation));
+        s.top.lerp(grey, cloud * 0.75);
+        s.horizon.lerp(grey, cloud * 0.6);
+        s.sunI *= 1 - 0.7 * cloud;
+        s.ambI *= 1 + 0.15 * cloud;
+      }
 
       // Direction to the light: the sun by day; at night a high moon opposite it, so shadows
       // still read and never come from below the ground.
