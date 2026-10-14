@@ -4,7 +4,7 @@ import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups } from './hass-map.js';
 import './editor.js';
 
-const VERSION = '0.3.2';
+const VERSION = '0.4.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -90,6 +90,8 @@ class House3DCard extends LitElement {
       this._error = `3D is not available on this device (${e.message}).`;
       return;
     }
+    this._glowIds = null;
+    this._syncHouse(true);
     this._resizeObs.observe(host);
     // Start on the ground storey; the chips peel up to the others.
     const levels = [...this._plan.levels].sort((a, b) => a.elevation - b.elevation);
@@ -138,8 +140,20 @@ class House3DCard extends LitElement {
     if (this._stage) this._labels = this._stage.labels();
   }
 
+  // Sun + every lamp's house-view glow, only when something they show changed.
+  _syncHouse(force = false) {
+    if (!this._stage || !this.hass) return;
+    const sun = this.hass.states[this._config.sun ?? 'sun.sun'];
+    if (sun) this._stage.setSun(Number(sun.attributes.elevation ?? -30), Number(sun.attributes.azimuth ?? 180));
+    const ids = this._glowIds ??= this._stage.glowEntities();
+    if (!force && ids.every((e) => this._glowSeen?.get(e) === this.hass.states[e])) return;
+    this._glowSeen = new Map(ids.map((e) => [e, this.hass.states[e]]));
+    this._stage.applyGlows((cfg) => lampState(this.hass.states[cfg.entity]));
+  }
+
   // Push live state into the focused room's lamps/ACs, only when one of them changed.
   _syncStates() {
+    this._syncHouse();
     if (!this._stage || !this._room || !this.hass) return;
     const lv = this._plan.levels.find((l) => l.id === this._room.level);
     const rooms = roomGroup(lv, this._room.id).map((r) => r.id);
