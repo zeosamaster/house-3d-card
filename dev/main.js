@@ -104,7 +104,7 @@ class FakeTile extends HTMLElement {
 customElements.define('fake-tile', FakeTile);
 
 // Stand-in for HA's ha-icon: a glyph per icon family.
-const GLYPH = { dishwasher: '🍽', 'washing-machine': '🧺', check: '✅', thermometer: '🌡', lightbulb: '💡', snowflake: '❄', fire: '🔥', door: '🚪', window: '🪟', weather: '⛅', solar: '☀', battery: '🔋',
+const GLYPH = { crosshairs: '⌖', dishwasher: '🍽', 'washing-machine': '🧺', check: '✅', thermometer: '🌡', lightbulb: '💡', snowflake: '❄', fire: '🔥', door: '🚪', window: '🪟', weather: '⛅', solar: '☀', battery: '🔋',
   lightning: '⚡', car: '🚗', fan: '🌀', water: '💧' };
 customElements.define('ha-icon', class extends HTMLElement {
   static get observedAttributes() { return ['icon']; }

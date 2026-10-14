@@ -6,7 +6,7 @@ import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp, a
 import { strings } from './i18n.js';
 import './editor.js';
 
-const VERSION = '0.11.0';
+const VERSION = '0.12.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -25,6 +25,7 @@ class House3DCard extends LitElement {
     _carAt: { state: true },
     _sheetBig: { state: true },
     _heat: { state: true },
+    _away: { state: true },
   };
 
   constructor() {
@@ -188,6 +189,8 @@ class House3DCard extends LitElement {
 
   _updateLabels() {
     if (!this._stage) return;
+    const away = this._stage.isAway();
+    if (away !== this._away) this._away = away;
     const labels = this._stage.labels();
     const key = labels.map((l) => `${l.id}:${Math.round(l.x)},${Math.round(l.y)}`).join('|');
     if (key !== this._labelsKey) { this._labelsKey = key; this._labels = labels; }
@@ -518,6 +521,7 @@ class House3DCard extends LitElement {
               ${levels.length > 1 ? levels.map((l) => html`
                 <button class="chip ${this._peel === l.id ? 'on' : ''}" @click=${() => this._setPeel(l.id)}>${l.name}</button>`) : nothing}`}
             <span class="grow"></span>
+
             ${!this._room && this.hass && this._plan ? this._allOff() : nothing}
             ${this._room ? nothing : html`<button class="chip icon ${this._heat ? 'on' : ''}" title=${this._t.temps}
               @click=${() => this._toggleHeat()}><ha-icon icon="mdi:thermometer"></ha-icon></button>`}
@@ -527,6 +531,8 @@ class House3DCard extends LitElement {
           </div>
           ${this._error ? html`<div class="error"><b>Can't show the house</b><p>${this._error}</p></div>` : nothing}
           ${!this._config.plan && plan && !this._room ? html`<div class="hint">${this._t.starter}</div>` : nothing}
+          ${this._away ? html`<button class="fab" title=${this._t.recenter} @click=${() => this._stage?.recenter()}>
+            <ha-icon icon="mdi:crosshairs-gps"></ha-icon></button>` : nothing}
           ${this._toast ? html`<div class="toast">${this._toast.text}${this._toast.action ? html`
             <button class="act" @click=${() => this._toast.action.run()}>${this._toast.action.label}</button>` : nothing}</div>` : nothing}
         </div>
@@ -617,6 +623,10 @@ class House3DCard extends LitElement {
     .error p { margin: 6px 0 0; white-space: pre-wrap; }
     .hint { bottom: 56px; }
     .toast { display: flex; align-items: center; gap: 12px; }
+    .fab { position: absolute; right: 12px; top: 58px; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+      color: #eef1f8; background: rgba(10, 14, 26, 0.72); border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(6px);
+      box-shadow: 0 4px 14px rgba(0,0,0,0.35); cursor: pointer; padding: 0; }
+    .fab ha-icon { --mdc-icon-size: 22px; width: 22px; height: 22px; display: inline-flex; }
     .toast .act { font: inherit; font-weight: 600; color: #8fb3ff; background: none; border: 0; cursor: pointer; padding: 2px 4px; }
     .chip.lit { display: inline-flex; align-items: center; gap: 4px; color: #ffd27a; }
     .chip.lit ha-icon { --mdc-icon-size: 16px; width: 16px; height: 16px; display: inline-flex; }

@@ -7,7 +7,7 @@ const STR = {
     roomNames: 'Room names', temps: 'Temperatures', everyOff: 'Turn off every light', roomOff: "Turn this room's lights off",
     noArea: 'This room is not linked to an HA area.', areaGone: 'Area not found.', loading: 'Loading…',
     starter: 'Starter layout from your HA areas — tap ✎ to arrange the rooms.', saved: 'Plan saved',
-    home: 'home', away: 'away', done: 'done', error: 'error', min: 'min', editHouse: 'Edit house',
+    recenter: 'Back to the start view', home: 'home', away: 'away', done: 'done', error: 'error', min: 'min', editHouse: 'Edit house',
   },
   pt: {
     lights: 'Luzes', climate: 'Clima', covers: 'Portas e janelas', media_players: 'Multimédia', security: 'Segurança', others: 'Outros',
@@ -16,7 +16,7 @@ const STR = {
     roomNames: 'Nomes das divisões', temps: 'Temperaturas', everyOff: 'Apagar todas as luzes', roomOff: 'Apagar as luzes desta divisão',
     noArea: 'Esta divisão não está ligada a uma área do HA.', areaGone: 'Área não encontrada.', loading: 'A carregar…',
     starter: 'Planta inicial a partir das áreas do HA — toque em ✎ para arrumar as divisões.', saved: 'Planta guardada',
-    home: 'em casa', away: 'fora', done: 'pronta', error: 'erro', min: 'min', editHouse: 'Editar casa',
+    recenter: 'Voltar à vista inicial', home: 'em casa', away: 'fora', done: 'pronta', error: 'erro', min: 'min', editHouse: 'Editar casa',
   },
 };
 
