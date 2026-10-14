@@ -33,6 +33,9 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.shadowMap.autoUpdate = false; // static model: shadow maps only when something changes
 
+  // Android drops WebGL contexts under memory pressure; three restores its state, we redraw.
+  canvas.addEventListener('webglcontextrestored', () => { shadowFrames = 3; wake(4); });
+
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(STAGE_BG);
   const camera = new THREE.PerspectiveCamera(24, 1, 0.5, 300);
@@ -535,6 +538,17 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       clearUnits();
+      // Free every GPU resource and drop the renderer's dispose listeners on (shared, cached)
+      // materials and textures, so the old context can be collected; three re-uploads them on
+      // next use by another stage.
+      scene.traverse((o) => {
+        o.geometry?.dispose?.();
+        for (const m of [o.material].flat().filter(Boolean)) {
+          for (const k of ['map', 'emissiveMap', 'normalMap']) m[k]?.dispose?.();
+          m.dispose?.();
+        }
+      });
+      scene.background?.dispose?.();
       composer.dispose();
       target.dispose();
       renderer.dispose();

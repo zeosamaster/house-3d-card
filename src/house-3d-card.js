@@ -6,7 +6,8 @@ import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp, a
 import { strings } from './i18n.js';
 import './editor.js';
 
-const VERSION = '0.10.0';
+const VERSION = '0.10.1';
+let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -34,7 +35,10 @@ class House3DCard extends LitElement {
     this._tiles = new Map();
     this._watched = new Map();
     this._onHash = () => this._fromHash();
-    this._onVisibility = () => this._stage?.setRunning(this.isConnected && !document.hidden);
+    this._onVisibility = () => {
+      this._stage?.setRunning(this.isConnected && !document.hidden);
+      if (!document.hidden) this._poke(); // re-arm the idle orbit after the screen wakes
+    };
   }
 
   setConfig(config) {
@@ -69,7 +73,10 @@ class House3DCard extends LitElement {
     window.addEventListener('popstate', this._onHash);
     document.addEventListener('visibilitychange', this._onVisibility);
     this._resizeObs ??= new ResizeObserver(() => { this._stage?.resize(); this._updateLabels(); });
+    clearTimeout(this._disposeT);
+    if (this._dirty) this.requestUpdate(); // stage was released while detached: rebuild it
     this._stage?.setRunning(!document.hidden);
+    if (this._stage) this._poke();
   }
 
   disconnectedCallback() {
@@ -79,6 +86,17 @@ class House3DCard extends LitElement {
     window.removeEventListener('popstate', this._onHash);
     document.removeEventListener('visibilitychange', this._onVisibility);
     this._stage?.setRunning(false);
+    clearInterval(this._tick);
+    this._tick = null;
+    // HA rebuilds card elements on every dashboard reload (reconnects, app resume, saves): a
+    // detached card must give its WebGL context back, or contexts pile up until the GPU evicts
+    // them. Short detaches (moving the card around) keep it.
+    clearTimeout(this._disposeT);
+    this._disposeT = setTimeout(() => {
+      this._stage?.dispose();
+      this._stage = null;
+      this._dirty = true;
+    }, 5000);
   }
 
   /* ---------- plan + stage ---------- */
@@ -109,9 +127,9 @@ class House3DCard extends LitElement {
         onLongPress: (t) => this._moreInfo(t.cfg?.entity),
         onMove: () => this._updateLabels(),
         capsOf: (cfg) => lampCaps(this.hass?.states[cfg.entity]),
-        intro: !this._introDone && !new URLSearchParams(location.hash.slice(1)).get('room'),
+        intro: !introPlayed && !new URLSearchParams(location.hash.slice(1)).get('room'),
       });
-      this._introDone = true;
+      introPlayed = true;
     } catch (e) {
       this._error = `3D is not available on this device (${e.message}).`;
       return;
@@ -170,11 +188,14 @@ class House3DCard extends LitElement {
 
   _updateLabels() {
     if (!this._stage) return;
-    this._labels = this._stage.labels();
+    const labels = this._stage.labels();
+    const key = labels.map((l) => `${l.id}:${Math.round(l.x)},${Math.round(l.y)}`).join('|');
+    if (key !== this._labelsKey) { this._labelsKey = key; this._labels = labels; }
     // The car chip floats above the first car in the plan.
     const lv = this._plan.levels.find((l) => l.furniture.some((f) => f.type === 'car'));
     const car = lv?.furniture.find((f) => f.type === 'car');
-    this._carAt = car && !this._room ? this._stage.project([car.pos[0], lv.elevation + 1.9 * (car.scale || 1), car.pos[1]]) : null;
+    const at = car && !this._room ? this._stage.project([car.pos[0], lv.elevation + 1.9 * (car.scale || 1), car.pos[1]]) : null;
+    if (Math.round(at?.x) !== Math.round(this._carAt?.x) || Math.round(at?.y) !== Math.round(this._carAt?.y)) this._carAt = at;
   }
 
   // Pills that would overlap (small phone screens) are nudged down; ~84×24 px each.
@@ -189,9 +210,17 @@ class House3DCard extends LitElement {
   }
 
   // One pill per room: its name (when names are on) plus what's going on in it right now.
+  // Room status is pure over hass: compute once per hass object, not on every camera frame.
+  _statusOf(level, id) {
+    if (this._statusHass !== this.hass) { this._statusHass = this.hass; this._statusMemo = new Map(); }
+    const key = `${level.id}/${id}`;
+    if (!this._statusMemo.has(key)) this._statusMemo.set(key, roomStatus(this.hass, level, id));
+    return this._statusMemo.get(key);
+  }
+
   _roomPill(l) {
     const level = this._plan.levels.find((x) => x.id === l.level);
-    const st = roomStatus(this.hass, level, l.id);
+    const st = this._statusOf(level, l.id);
     const showTemp = st.temp != null && (this._showLabels || this._heat);
     if (!this._showLabels && !st.busy && !showTemp) return nothing;
     const ac = st.acs[0];
@@ -207,9 +236,16 @@ class House3DCard extends LitElement {
   }
 
   _dock() {
-    const d = dockStatus(this.hass, this._config.status);
+    // Once per hass object (and per 30 s, for the countdowns) — not on every camera frame.
+    const bucket = Math.floor(Date.now() / 30000);
+    if (this._dockHass !== this.hass || this._dockBucket !== bucket) {
+      this._dockHass = this.hass;
+      this._dockBucket = bucket;
+      this._dockMemo = { d: dockStatus(this.hass, this._statusCfg()), apps: appliancesStatus(this.hass, this._config.status?.appliances) };
+    }
+    const { d, apps } = this._dockMemo;
     // Countdowns move on their own: re-render every 30 s while an appliance is running.
-    const running = appliancesStatus(this.hass, this._config.status?.appliances).some((a) => a.phase === 'running');
+    const running = apps.some((a) => a.phase === 'running');
     if (running && !this._tick) this._tick = setInterval(() => this.requestUpdate(), 30000);
     if (!running && this._tick) { clearInterval(this._tick); this._tick = null; }
     const info = (entity) => () => this._moreInfo(entity);
@@ -222,7 +258,7 @@ class House3DCard extends LitElement {
         ${d.solar ? html`<button class="dk ${d.solar.value > 0.05 ? 'sun' : ''}" @click=${info(d.solar.entity)}><ha-icon icon="mdi:solar-power-variant"></ha-icon>${fmt(d.solar.value, ` ${d.solar.unit}`)}</button>` : nothing}
         ${d.battery ? html`<button class="dk" @click=${info(d.battery.entity)}><ha-icon icon=${d.battery.value > 80 ? 'mdi:battery-high' : d.battery.value > 30 ? 'mdi:battery-medium' : 'mdi:battery-low'}></ha-icon>${fmt(d.battery.value, '%')}</button>` : nothing}
         ${d.load ? html`<button class="dk" @click=${info(d.load.entity)}><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon>${fmt(d.load.value, ` ${d.load.unit}`)}</button>` : nothing}
-        ${appliancesStatus(this.hass, this._config.status?.appliances).map((a) => html`
+        ${apps.map((a) => html`
           <button class="dk appliance ${a.phase}" @click=${info(a.entity)}><ha-icon icon=${a.phase === 'done' ? 'mdi:check-circle' : a.icon}></ha-icon>
             ${a.name}${a.phase === 'running' && a.minutes != null ? ` · ${a.minutes} ${this._t.min}` : a.phase === 'done' ? ` · ${this._t.done}` : a.phase === 'error' ? ` · ${this._t.error}` : ''}</button>`)}
       </div>`;
@@ -247,6 +283,16 @@ class House3DCard extends LitElement {
       <ha-icon icon="mdi:lightbulb-group-off-outline"></ha-icon>${lit}</button>`;
   }
 
+  // status: with the default weather/people resolved once (not a scan of every state per update).
+  _statusCfg() {
+    const cfg = this._config.status || {};
+    if (!this._defaults && this.hass) {
+      const ids = Object.keys(this.hass.states);
+      this._defaults = { weather: ids.find((e) => e.startsWith('weather.')), people: ids.filter((e) => e.startsWith('person.')) };
+    }
+    return { ...cfg, weather: cfg.weather ?? this._defaults?.weather, people: cfg.people ?? this._defaults?.people };
+  }
+
   _carChip() {
     const c = carStatus(this.hass, this._config.car);
     if (!c || !this._carAt) return nothing;
@@ -261,7 +307,7 @@ class House3DCard extends LitElement {
     if (!this._stage || !this.hass) return;
     const sun = this.hass.states[this._config.sun ?? 'sun.sun'];
     if (sun) this._stage.setSun(Number(sun.attributes.elevation ?? -30), Number(sun.attributes.azimuth ?? 180));
-    const weather = this.hass.states[this._config.status?.weather ?? Object.keys(this.hass.states).find((e) => e.startsWith('weather.'))];
+    const weather = this.hass.states[this._statusCfg().weather];
     if (weather) this._stage.setWeather(cloudOf(weather.state));
     this._syncHeat();
     const ids = this._glowIds ??= this._stage.glowEntities();
@@ -314,7 +360,7 @@ class House3DCard extends LitElement {
     const lv = this._plan.levels.find((l) => l.id === this._room.level);
     const rooms = roomGroup(lv, this._room.id).map((r) => r.id);
     const ids = [...lv.lights, ...lv.acs].filter((d) => rooms.includes(d.room)).map((d) => d.entity).filter(Boolean);
-    if (ids.length && ids.every((e) => this._watched.get(e) === this.hass.states[e])) return;
+    if (ids.every((e) => this._watched.get(e) === this.hass.states[e])) return;
     this._watched = new Map(ids.map((e) => [e, this.hass.states[e]]));
     this._stage.applyStates((kind, cfg) => (kind === 'light'
       ? lampState(this.hass.states[cfg.entity]) : acState(this.hass.states[cfg.entity])));
@@ -392,6 +438,8 @@ class House3DCard extends LitElement {
     const groups = areaGroups(this.hass, room.area, curation).map((g) => ({
       ...g, cards: g.entities.map((e) => this._tile(helpers, e)).filter(Boolean),
     }));
+    const keep = new Set(groups.flatMap((g) => g.entities));
+    for (const e of [...this._tiles.keys()]) if (!keep.has(e)) this._tiles.delete(e);
     this._sheet = { room, groups };
   }
 
@@ -419,7 +467,7 @@ class House3DCard extends LitElement {
   async _save(plan) {
     const urlPath = this._config.dashboard ?? location.pathname.split('/')[1];
     const lovelace = await this.hass.callWS({ type: 'lovelace/config', url_path: urlPath === 'lovelace' ? null : urlPath });
-    const card = findCard(lovelace);
+    const card = findCard(lovelace, (c) => JSON.stringify(c.plan ?? null) === this._planKey) || findCard(lovelace);
     if (!card) throw new Error(`No ${TYPE} found in dashboard "${urlPath}"`);
     const was = this._config.plan?.revision || 0;
     if ((card.plan?.revision || 0) !== was) {
@@ -435,10 +483,13 @@ class House3DCard extends LitElement {
   /* ---------- lifecycle ---------- */
 
   updated(changed) {
-    if (this._dirty && this.hass) this._build();
+    // Never build while detached: hass can keep arriving after HA throws the element away.
+    if (this._dirty && this.hass && this.isConnected) this._build();
     if (changed.has('hass') && this.hass) {
       this._syncStates();
-      for (const el of this._tiles.values()) el.hass = this.hass;
+      // Only the open sheet's tiles get live state.
+      for (const g of this._sheet?.groups || []) for (const el of g.cards) el.hass = this.hass;
+      if (this._room && this._sheet?.note === this._t.areaGone && this.hass.areas?.[this._room.area]) this._loadSheet();
     }
   }
 
@@ -493,7 +544,7 @@ class House3DCard extends LitElement {
           </aside>` : nothing}
       </div>
       ${this._editing ? html`
-        <house-3d-editor .hass=${this.hass} .plan=${this._editPlan}
+        <house-3d-editor .hass=${this._editHass} .plan=${this._editPlan}
           .save=${(p) => this._save(p)} @close=${() => { this._editing = false; }}></house-3d-editor>` : nothing}
     `;
   }
@@ -502,6 +553,7 @@ class House3DCard extends LitElement {
   // render (hass updates re-render the card every few seconds) silently threw edits away.
   _openEditor() {
     this._editPlan = structuredClone(this._rawPlan);
+    this._editHass = this.hass;
     this._editing = true;
   }
 
@@ -617,11 +669,11 @@ function writePref(key, value) {
   try { localStorage.setItem(`house-3d-card.${key}`, value); } catch { /* not persisted */ }
 }
 
-function findCard(node) {
+function findCard(node, match = () => true) {
   if (!node || typeof node !== 'object') return null;
-  if (node.type === TYPE) return node;
+  if (node.type === TYPE && match(node)) return node;
   for (const v of Object.values(node)) {
-    const hit = Array.isArray(v) ? v.map(findCard).find(Boolean) : typeof v === 'object' ? findCard(v) : null;
+    const hit = Array.isArray(v) ? v.map((x) => findCard(x, match)).find(Boolean) : typeof v === 'object' ? findCard(v, match) : null;
     if (hit) return hit;
   }
   return null;
