@@ -1,0 +1,4 @@
+node_modules/
+dist/
+dev/fixture.json
+dev/dashboard-areas.json
