@@ -345,7 +345,9 @@ class HouseEditor extends LitElement {
         <div class="row">
           ${this._field('Width', item.rect[2], (v) => { item.rect[2] = v; }, { type: 'number', step: STEP })}
           ${this._field('Depth', item.rect[3], (v) => { item.rect[3] = v; }, { type: 'number', step: STEP })}
+          ${this._field('Rotation°', item.rot ?? 0, (v) => { item.rot = v || undefined; }, { type: 'number', step: 15 })}
         </div>
+        <p class="help">Rooms sharing an HA area act as one room (L-shapes): no wall between them, one label.</p>
         ${this.plan.levels.length > 1 ? this._select('Storey', String(this._lv), this.plan.levels.map((l, i) => [String(i), l.name]),
           (v) => { this._undo.pop(); this._moveRoomToLevel(Number(v)); }) : nothing}
         <h3>Add to room</h3>
@@ -439,9 +441,10 @@ class HouseEditor extends LitElement {
         <path d="M1 0H0V1" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="0.015"/></pattern></defs>
       <rect x=${vb[0] - 50} y=${vb[1] - 50} width="200" height="200" fill="url(#grid)"/>
       ${below.flatMap((l) => l.rooms).map((r) => svg`<rect class="ghost" x=${r.rect[0]} y=${r.rect[1]} width=${r.rect[2]} height=${r.rect[3]}/>`)}
-      ${lv.rooms.map((r, i) => {
+      ${lv.rooms.map((r, i) => [r, i]).sort(([a], [b]) => Boolean(a.rot) - Boolean(b.rot)).map(([r, i]) => {
         const [x, z, w, d] = r.rect;
-        return svg`<g class="room ${isSel('room', i) ? 'sel' : ''} ${r.outdoor ? 'out' : ''}" data-kind="room" data-index=${i}>
+        return svg`<g class="room ${isSel('room', i) ? 'sel' : ''} ${r.outdoor ? 'out' : ''}" data-kind="room" data-index=${i}
+          transform=${r.rot ? `rotate(${-r.rot} ${x + w / 2} ${z + d / 2})` : ''}>
           <rect x=${x} y=${z} width=${w} height=${d} fill=${FILL[r.floor] || FILL.oak}/>
           <text x=${x + w / 2} y=${z + d / 2} class="lbl">${r.name}</text>
           <text x=${x + w / 2} y=${z + d / 2 + 0.38} class="dim">${fix(w)} × ${fix(d)}${r.area ? '' : ' · no area'}</text></g>`;
@@ -462,7 +465,7 @@ class HouseEditor extends LitElement {
         transform="translate(${l.pos[0]} ${l.pos[1]}) rotate(${-(l.rot || 0)})">
         ${l.type === 'strip' ? svg`<rect x=${-(l.length || 1) / 2} y="-0.07" width=${l.length || 1} height="0.14" rx="0.07"/>`
           : svg`<circle r="0.3" class="halo"/><circle r="0.17"/>`}</g>`)}
-      ${this._sel?.kind === 'room' && lv.rooms[this._sel.index] ? (() => {
+      ${this._sel?.kind === 'room' && lv.rooms[this._sel.index] && !lv.rooms[this._sel.index].rot ? (() => {
         const [x, z, w, d] = lv.rooms[this._sel.index].rect;
         return svg`<circle class="handle" cx=${x + w} cy=${z + d} r="0.2" data-kind="resize" data-index=${this._sel.index}/>`;
       })() : nothing}`;

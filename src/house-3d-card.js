@@ -1,10 +1,10 @@
 import { LitElement, html, css, nothing } from 'lit';
-import { normalizePlan, planFromAreas } from './plan.js';
+import { normalizePlan, planFromAreas, roomGroup } from './plan.js';
 import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups } from './hass-map.js';
 import './editor.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -136,7 +136,8 @@ class House3DCard extends LitElement {
   _syncStates() {
     if (!this._stage || !this._room || !this.hass) return;
     const lv = this._plan.levels.find((l) => l.id === this._room.level);
-    const ids = [...lv.lights, ...lv.acs].filter((d) => d.room === this._room.id).map((d) => d.entity).filter(Boolean);
+    const rooms = roomGroup(lv, this._room.id).map((r) => r.id);
+    const ids = [...lv.lights, ...lv.acs].filter((d) => rooms.includes(d.room)).map((d) => d.entity).filter(Boolean);
     if (ids.length && ids.every((e) => this._watched.get(e) === this.hass.states[e])) return;
     this._watched = new Map(ids.map((e) => [e, this.hass.states[e]]));
     this._stage.applyStates((kind, cfg) => (kind === 'light'
@@ -146,7 +147,8 @@ class House3DCard extends LitElement {
   _pick(t) {
     if (!t) return;
     if (t.kind === 'room') {
-      if (t.id !== this._room?.id) this._focus(t.id);
+      const lv = this._room && this._plan.levels.find((l) => l.id === this._room.level);
+      if (!lv || !roomGroup(lv, this._room.id).some((r) => r.id === t.id)) this._focus(t.id);
       return;
     }
     const entity = t.cfg?.entity;

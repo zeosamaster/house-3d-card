@@ -65,7 +65,10 @@ window.loadCardHelpers = async () => ({
 window.addEventListener('hass-more-info', (e) => log(`more-info ${e.detail.entityId}`));
 
 const saved = new URLSearchParams(location.search).get('plan') === 'saved' && localStorage.getItem('house3d-dashboard');
-let dashboard = saved ? JSON.parse(saved) : { views: [{ type: 'panel', cards: [{ type: 'custom:house-3d-card', dashboard: 'house-3d' }] }] };
+// dev/plan.json (gitignored), when present, is the starting plan.
+const devPlan = Object.values(import.meta.glob('./plan.json', { eager: true, import: 'default' }))[0];
+let dashboard = saved ? JSON.parse(saved)
+  : { views: [{ type: 'panel', cards: [{ type: 'custom:house-3d-card', dashboard: 'house-3d', ...(devPlan ? { plan: devPlan } : {}) }] }] };
 
 const card = document.createElement('house-3d-card');
 card.setConfig(dashboard.views[0].cards[0]);

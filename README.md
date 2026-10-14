@@ -75,6 +75,9 @@ plan:
 
 Outdoor rooms (`outdoor: true`) have no walls and take `grass`, `deck`, `paving`, `water` or `stone`. A storey's `elevation` defaults to stacking on the one below.
 
+- **Rooms sharing an `area`** on a storey act as one room: no wall between them, one label, one room view. Use it for L-shapes and split zones.
+- **`rot`** (degrees) turns a room about its rect's centre. A rotated room builds its own four walls and ignores openings. Where it overlaps axis-aligned rooms, its floor wins; put `type: open` openings on their edges to drop walls it replaces.
+
 ## Development
 
 ```bash

@@ -9,6 +9,7 @@ import { buildHouse } from './three/house.js';
 import { buildFurniture } from './three/furniture.js';
 import { LightUnit } from './three/lights.js';
 import { ACUnit } from './three/ac.js';
+import { roomGroup } from './plan.js';
 
 export const STAGE_BG = '#0a0e1a';
 const rad = THREE.MathUtils.degToRad;
@@ -85,7 +86,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
   /* ---------- view state ---------- */
 
   let peel = null;  // house view: hide storeys above this one (null = whole house)
-  let room = null;  // room view: { level, id }
+  let room = null;  // room view: { level, id, ids } — ids: every rect of the room's area
   let units = [];   // LightUnit / ACUnit of the focused room
 
   const topVisible = () => {
@@ -142,9 +143,11 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
     let box;
     let fill = 0.92;
     if (room) {
-      const r = roomOf(room.level, room.id);
+      const rs = levelOf(room.level).cfg.rooms.filter((r) => room.ids.includes(r.id));
       const y = levelOf(room.level).cfg.elevation;
-      box = new THREE.Box3(new THREE.Vector3(r.x, y, r.z), new THREE.Vector3(r.x + r.w, y + H * 0.75, r.z + r.d));
+      box = new THREE.Box3(
+        new THREE.Vector3(Math.min(...rs.map((r) => r.bx0)), y, Math.min(...rs.map((r) => r.bz0))),
+        new THREE.Vector3(Math.max(...rs.map((r) => r.bx1)), y + H * 0.75, Math.max(...rs.map((r) => r.bz1))));
       fill = 0.84;
     } else {
       const vis = topVisible();
@@ -185,13 +188,13 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
     clearUnits();
     if (!room) return;
     const lv = levelOf(room.level);
-    for (const cfg of lv.cfg.lights.filter((l) => l.room === room.id)) {
+    for (const cfg of lv.cfg.lights.filter((l) => room.ids.includes(l.room))) {
       const u = new LightUnit({ ...cfg, capabilities: cfg.capabilities || capsOf(cfg) }, H);
       u.kind = 'light';
       lv.group.add(u.group);
       units.push(u);
     }
-    for (const cfg of lv.cfg.acs.filter((a) => a.room === room.id)) {
+    for (const cfg of lv.cfg.acs.filter((a) => room.ids.includes(a.room))) {
       const u = new ACUnit(cfg);
       u.kind = 'ac';
       lv.group.add(u.group);
@@ -346,7 +349,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
     },
 
     focusRoom(next) {
-      room = next && roomOf(next.level, next.id) ? next : null;
+      room = next && roomOf(next.level, next.id)
+        ? { ...next, ids: roomGroup(levelOf(next.level).cfg, next.id).map((r) => r.id) } : null;
       buildUnits();
       applyVisibility();
       rig.zoom = 1;
@@ -362,15 +366,20 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
     },
 
     // Screen positions of room labels: the top visible storey's rooms, plus the garden.
+    // One label per area, on its biggest rect.
     labels() {
       const vis = topVisible();
       const top = vis[vis.length - 1];
       const out = [];
       camera.updateMatrixWorld();
       for (const l of vis) {
-        for (const r of l.cfg.rooms) {
+        const seen = new Set();
+        const rooms = [...l.cfg.rooms].sort((a, b) => b.w * b.d - a.w * a.d);
+        for (const r of rooms) {
+          if (r.area && seen.has(r.area)) continue;
+          if (r.area) seen.add(r.area);
           if (l !== top && !r.outdoor) continue;
-          if (room && r.id !== room.id) continue;
+          if (room && !room.ids.includes(r.id)) continue;
           v.set(r.x + r.w / 2, l.cfg.elevation + (room ? H * 0.9 : 0.05), r.z + r.d / 2).project(camera);
           if (v.z > 1) continue;
           out.push({ id: r.id, level: l.cfg.id, name: r.name, x: (v.x * 0.5 + 0.5) * width, y: (-v.y * 0.5 + 0.5) * height });

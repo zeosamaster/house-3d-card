@@ -20,11 +20,12 @@ function wallSegments(config) {
   };
 
   for (const r of config.rooms) {
-    if (r.outdoor) continue; // gardens, decks and pools have no walls
-    line('x', r.z).edges.push({ a: r.x, b: r.x + r.w, inside: 1 });
-    line('x', r.z + r.d).edges.push({ a: r.x, b: r.x + r.w, inside: -1 });
-    line('z', r.x).edges.push({ a: r.z, b: r.z + r.d, inside: 1 });
-    line('z', r.x + r.w).edges.push({ a: r.z, b: r.z + r.d, inside: -1 });
+    if (r.outdoor || r.rot) continue; // gardens have no walls; rotated rooms build their own
+    const area = r.area;
+    line('x', r.z).edges.push({ a: r.x, b: r.x + r.w, inside: 1, area });
+    line('x', r.z + r.d).edges.push({ a: r.x, b: r.x + r.w, inside: -1, area });
+    line('z', r.x).edges.push({ a: r.z, b: r.z + r.d, inside: 1, area });
+    line('z', r.x + r.w).edges.push({ a: r.z, b: r.z + r.d, inside: -1, area });
   }
   for (const o of config.openings) {
     const alongX = o.from[1] === o.to[1];
@@ -44,6 +45,8 @@ function wallSegments(config) {
       const mid = (pts[i] + pts[i + 1]) / 2;
       const covering = l.edges.filter((e) => e.a < mid && mid < e.b);
       if (!covering.length) continue;
+      // Two parts of one area (an L-shaped room) are not divided by a wall.
+      if (covering.length > 1 && covering[0].area && covering.every((e) => e.area === covering[0].area)) continue;
       const seg = {
         axis: l.axis, c: l.c, a: pts[i], b: pts[i + 1],
         kind: covering.length > 1 ? 'interior' : 'exterior',
@@ -80,7 +83,7 @@ export function buildHouse(config, camDir, { plinth: withPlinth = true } = {}) {
   group.add(plinth);
   }
 
-  for (const room of config.rooms) {
+  for (const room of config.rooms.filter((r) => !r.rot)) {
     const floor = floorMesh(room, room.floor);
     floor.userData = { kind: 'room', id: room.id, level: config.levelId };
     floors.push(floor);
@@ -147,5 +150,41 @@ export function buildHouse(config, camDir, { plinth: withPlinth = true } = {}) {
     if (!exterior && Hi < H) piece(s, a, b, Hi, H, 0.04, blocker).receiveShadow = false;
   }
 
+  for (const room of config.rooms.filter((r) => r.rot)) {
+    floors.push(rotatedRoom(room, config, camDir, group, wallMats));
+  }
+
   return { group, floors };
+}
+
+// A room turned about its centre: its own floor and four exterior walls (no openings),
+// sitting a hair above any axis-aligned floor it overlaps.
+function rotatedRoom(room, config, camDir, parent, wallMats) {
+  const H = config.wallHeight;
+  const g = new THREE.Group();
+  g.position.set(room.x + room.w / 2, 0.004, room.z + room.d / 2);
+  g.rotation.y = THREE.MathUtils.degToRad(room.rot);
+  parent.add(g);
+
+  const floor = floorMesh({ x: -room.w / 2, z: -room.d / 2, w: room.w, d: room.d }, room.floor);
+  floor.userData = { kind: 'room', id: room.id, level: config.levelId };
+  g.add(floor);
+  if (room.outdoor) return floor;
+
+  const n = new THREE.Vector3();
+  const sides = [
+    [0, -room.d / 2, room.w, 0, -1], [0, room.d / 2, room.w, 0, 1],
+    [-room.w / 2, 0, room.d, -1, 0], [room.w / 2, 0, room.d, 1, 0],
+  ];
+  for (const [x, z, len, nx, nz] of sides) {
+    n.set(nx, 0, nz).applyAxisAngle(new THREE.Vector3(0, 1, 0), g.rotation.y);
+    const h = n.dot(camDir) > 0.15 ? CURB : H;
+    const along = nz !== 0;
+    const geo = along ? new THREE.BoxGeometry(len + EXT_T, h, EXT_T) : new THREE.BoxGeometry(EXT_T, h, len + EXT_T);
+    const m = new THREE.Mesh(geo, wallMats);
+    m.position.set(x, h / 2, z);
+    m.castShadow = m.receiveShadow = true;
+    g.add(m);
+  }
+  return floor;
 }

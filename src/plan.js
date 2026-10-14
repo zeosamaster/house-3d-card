@@ -33,8 +33,9 @@ export function normalizePlan(raw) {
         `${where}: room "${r.id}" needs "rect": [x, z, width, depth]`);
       const [x, z, w, d] = r.rect;
       need(w > 0 && d > 0, `${where}: room "${r.id}" has an empty rect`);
+      const rot = Number(r.rot) || 0;
       return {
-        id: r.id, name: r.name || r.id, area: r.area || null, x, z, w, d,
+        id: r.id, name: r.name || r.id, area: r.area || null, x, z, w, d, rot, ...aabb(x, z, w, d, rot),
         outdoor: Boolean(r.outdoor), floor: r.floor || (r.outdoor ? 'grass' : 'oak'),
       };
     });
@@ -79,14 +80,32 @@ export function normalizePlan(raw) {
   };
 }
 
+// Axis-aligned box of a room; a rotated room turns about its rect's centre.
+function aabb(x, z, w, d, rot) {
+  if (!rot) return { bx0: x, bz0: z, bx1: x + w, bz1: z + d };
+  const a = (rot * Math.PI) / 180;
+  const hw = Math.abs((w / 2) * Math.cos(a)) + Math.abs((d / 2) * Math.sin(a));
+  const hd = Math.abs((w / 2) * Math.sin(a)) + Math.abs((d / 2) * Math.cos(a));
+  const cx = x + w / 2;
+  const cz = z + d / 2;
+  return { bx0: cx - hw, bz0: cz - hd, bx1: cx + hw, bz1: cz + hd };
+}
+
 export function boundsOf(rooms) {
   if (!rooms.length) return { minX: 0, minZ: 0, maxX: 6, maxZ: 4 };
   return {
-    minX: Math.min(...rooms.map((r) => r.x)),
-    minZ: Math.min(...rooms.map((r) => r.z)),
-    maxX: Math.max(...rooms.map((r) => r.x + r.w)),
-    maxZ: Math.max(...rooms.map((r) => r.z + r.d)),
+    minX: Math.min(...rooms.map((r) => r.bx0 ?? r.x)),
+    minZ: Math.min(...rooms.map((r) => r.bz0 ?? r.z)),
+    maxX: Math.max(...rooms.map((r) => r.bx1 ?? r.x + r.w)),
+    maxZ: Math.max(...rooms.map((r) => r.bz1 ?? r.z + r.d)),
   };
+}
+
+// Rooms that share an HA area on a storey act as one room (L-shapes, split zones).
+export function roomGroup(level, roomId) {
+  const room = level.rooms.find((r) => r.id === roomId);
+  if (!room) return [];
+  return room.area ? level.rooms.filter((r) => r.area === room.area) : [room];
 }
 
 const OUTDOOR_FLOOR = /ext|outdoor|outside|garden|jardim|quintal/i;
