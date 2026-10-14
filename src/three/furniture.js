@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { box, cyl, mat, at, rng } from './kit.js';
 import { stairs, stairsFootprint } from './stairs.js';
+import { tree, treeFootprint, hedge, bush, sunbed, parasol, grill, outdoorSofa, bench, flowerbed } from './garden.js';
 
 const WOOD = '#a98459';
 const DARK_WOOD = '#5a4334';
@@ -65,6 +66,7 @@ function doorLines(width, height, y, z, count, material) {
 
 const builders = {
   stairs,
+  tree, hedge, bush, sunbed, parasol, grill, outdoorSofa, bench, flowerbed,
 
   // A Tesla Model Y-ish crossover: extruded side profile, glass greenhouse, four wheels.
   car({ color = '#e8e8ea' }) {
@@ -388,6 +390,15 @@ function baseFootprint(item) {
     case 'bed': return [(w || 1.6) + 0.1, 2.14];
     case 'car': return [1.95, 4.75];
     case 'stairs': return stairsFootprint(item);
+    case 'tree': return treeFootprint(item);
+    case 'hedge': return [w || 3, item.depth || 0.6];
+    case 'bush': return [item.size || 0.8, item.size || 0.8];
+    case 'sunbed': return [0.72, 1.95];
+    case 'parasol': return [item.size || 2.5, item.size || 2.5];
+    case 'grill': return [0.7, 0.66];
+    case 'outdoorSofa': return [w || 2, 0.85];
+    case 'bench': return [w || 1.6, 0.6];
+    case 'flowerbed': return [w || 2, item.depth || 0.8];
     case 'nightstand': return [0.46, 0.4];
     case 'dresser': return [w || 1.3, 0.45];
     case 'plant': return [0.45, 0.45];
