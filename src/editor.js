@@ -32,6 +32,8 @@ class HouseEditor extends LitElement {
     this._lv = 0;
     this._sel = null;
     this._undo = [];
+    this._pointers = new Map(); // active touches/mouse, for pinch
+    this._vb = null;            // null = fit the plan; set once the user zooms or pans
     this._onKey = (ev) => this._key(ev);
   }
 
@@ -111,13 +113,36 @@ class HouseEditor extends LitElement {
   }
 
   _down(ev) {
+    try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { /* synthetic or already gone */ }
+    this._pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (this._pointers.size === 2) {
+      // Second finger: whatever the first one was dragging stops; the two pinch the view.
+      this._drag = null;
+      this._pan = null;
+      const [a, b] = [...this._pointers.values()];
+      const vb = this._currentVb();
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      this._pinch = { vb, dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, anchor: this._toPlan(mid.x, mid.y, vb) };
+      return;
+    }
+    if (this._pointers.size > 2 || this._pinch) return;
     const el = ev.target.closest('[data-kind]');
     const kind = el?.dataset.kind;
-    if (!kind) { this._sel = null; return; }
+    if (!kind) {
+      // Empty plan: drag pans, a plain tap deselects.
+      this._pan = { x: ev.clientX, y: ev.clientY, vb: this._currentVb(), moved: false };
+      return;
+    }
     const index = Number(el.dataset.index);
+    // Touch: a drag that starts on something not yet selected pans (zoomed in, rooms cover
+    // everything, so panning would otherwise keep moving rooms by accident); a tap selects it.
+    // Selected things, the resize dot and anything under a mouse drag directly.
+    if (ev.pointerType !== 'mouse' && kind !== 'resize' && !(this._sel?.kind === kind && this._sel.index === index)) {
+      this._pan = { x: ev.clientX, y: ev.clientY, vb: this._currentVb(), moved: false, select: { kind, index } };
+      return;
+    }
     const start = this._point(ev);
-    ev.currentTarget.setPointerCapture(ev.pointerId);
-    const vb = this._viewBox();
+    const vb = this._currentVb();
     if (kind === 'resize') { this._drag = { kind, index, start, rect: [...this.level.rooms[index].rect], vb }; return; }
     this._sel = { kind, index };
     const item = this._item();
@@ -142,6 +167,24 @@ class HouseEditor extends LitElement {
   }
 
   _move(ev) {
+    if (this._pointers.has(ev.pointerId)) this._pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (this._pinch) {
+      if (this._pointers.size < 2) return;
+      const [a, b] = [...this._pointers.values()];
+      const scale = this._pinch.dist / (Math.hypot(a.x - b.x, a.y - b.y) || 1);
+      this._vb = this._zoomed(this._pinch.vb, scale, this._pinch.anchor, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      return;
+    }
+    if (this._pan) {
+      const p = this._pan;
+      const dx = ev.clientX - p.x;
+      const dy = ev.clientY - p.y;
+      if (!p.moved && Math.hypot(dx, dy) < 5) return;
+      p.moved = true;
+      const k = this._fit(p.vb).k;
+      this._vb = [p.vb[0] - dx / k, p.vb[1] - dy / k, p.vb[2], p.vb[3]];
+      return;
+    }
     const drag = this._drag;
     if (!drag) return;
     const [px, pz] = this._point(ev);
@@ -178,7 +221,45 @@ class HouseEditor extends LitElement {
     this.requestUpdate();
   }
 
-  _up() { this._drag = null; }
+  _up(ev) {
+    this._pointers.delete(ev.pointerId);
+    if (this._pan && !this._pan.moved) this._sel = this._pan.select || null;
+    this._pan = null;
+    this._drag = null;
+    if (!this._pointers.size) this._pinch = null; // lifting one finger of a pinch doesn't start a pan
+  }
+
+  /* ---------- zoom & pan ---------- */
+
+  _currentVb() { return this._vb || this._drag?.vb || this._viewBox(); }
+
+  // How the SVG letterboxes a viewBox (preserveAspectRatio meet): px per metre and offsets.
+  _fit(vb) {
+    const r = this.renderRoot.querySelector('svg.plan').getBoundingClientRect();
+    const k = Math.min(r.width / vb[2], r.height / vb[3]);
+    return { r, k, ox: (r.width - vb[2] * k) / 2, oy: (r.height - vb[3] * k) / 2 };
+  }
+
+  _toPlan(sx, sy, vb) {
+    const { r, k, ox, oy } = this._fit(vb);
+    return { x: vb[0] + (sx - r.left - ox) / k, y: vb[1] + (sy - r.top - oy) / k };
+  }
+
+  // vb scaled by `scale`, placed so plan point `anchor` sits under screen point (sx, sy).
+  _zoomed(vb, scale, anchor, sx, sy) {
+    const fitted = this._viewBox();
+    const s = Math.min(Math.max(scale, 3 / vb[2]), (fitted[2] * 2) / vb[2]); // 3 m … 2× the whole plot
+    const w = vb[2] * s;
+    const h = vb[3] * s;
+    const { r, k, ox, oy } = this._fit([0, 0, w, h]);
+    return [anchor.x - (sx - r.left - ox) / k, anchor.y - (sy - r.top - oy) / k, w, h];
+  }
+
+  _wheel(ev) {
+    ev.preventDefault();
+    const vb = this._currentVb();
+    this._vb = this._zoomed(vb, Math.exp(ev.deltaY * 0.0015), this._toPlan(ev.clientX, ev.clientY, vb), ev.clientX, ev.clientY);
+  }
 
   /* ---------- editing actions ---------- */
 
@@ -330,7 +411,7 @@ class HouseEditor extends LitElement {
             <small>${this.hass.floors?.[a.floor_id]?.name || ''}</small></button>`)}
           <button @click=${() => this._addRoom(null)}>+ Room without area</button>
         </div>
-        <p class="help">Drag rooms to move them, drag the corner dot to resize. Rooms that touch share a wall.
+        <p class="help">Pinch or scroll to zoom; drag to pan. Tap a room, lamp or AC to select it, then drag it to move (a mouse drags directly); drag a room's corner dot to resize. Rooms that touch share a wall.
           Select a room to add doors, windows, lamps, ACs and furniture.</p>`;
     }
     const del = html`<button class="danger" @click=${() => this._remove()}>Delete</button>`;
@@ -441,7 +522,7 @@ class HouseEditor extends LitElement {
 
   _planSvg() {
     const lv = this.level;
-    const vb = this._drag?.vb || this._viewBox();
+    const vb = this._currentVb();
     const isSel = (k, i) => this._sel?.kind === k && this._sel.index === i;
     const below = this.plan.levels.filter((l, i) => i !== this._lv && (l.elevation ?? i) < (lv.elevation ?? this._lv));
     return svg`
@@ -485,7 +566,7 @@ class HouseEditor extends LitElement {
 
   render() {
     if (!this.plan) return nothing;
-    const vb = this._drag?.vb || this._viewBox();
+    const vb = this._currentVb();
     return html`
       <div class="ed">
         <header>
@@ -500,8 +581,11 @@ class HouseEditor extends LitElement {
           <button class="primary" ?disabled=${this._busy} @click=${() => this._save()}>${this._busy ? 'Saving…' : 'Save'}</button>
         </header>
         <main>
-          <svg class="plan" viewBox=${vb.join(' ')} @pointerdown=${(e) => this._down(e)} @pointermove=${(e) => this._move(e)}
-            @pointerup=${() => this._up()} @pointercancel=${() => this._up()}>${this._planSvg()}</svg>
+          <div class="plan-wrap">
+            <svg class="plan" viewBox=${vb.join(' ')} @pointerdown=${(e) => this._down(e)} @pointermove=${(e) => this._move(e)}
+              @pointerup=${(e) => this._up(e)} @pointercancel=${(e) => this._up(e)} @wheel=${(e) => this._wheel(e)}>${this._planSvg()}</svg>
+            ${this._vb ? html`<button class="fit" @click=${() => { this._vb = null; }}>Fit</button>` : nothing}
+          </div>
           <aside>${this._inspector()}</aside>
         </main>
       </div>`;
@@ -521,7 +605,9 @@ class HouseEditor extends LitElement {
     .msg { font-size: 13px; color: #9fd49f; max-width: 50%; }
     .msg.bad { color: #ff9b9b; }
     main { flex: 1; display: flex; min-height: 0; }
-    svg.plan { flex: 1; min-width: 0; height: 100%; touch-action: none; user-select: none; }
+    .plan-wrap { position: relative; flex: 1; min-width: 0; min-height: 0; }
+    svg.plan { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; }
+    .fit { position: absolute; left: 10px; bottom: 10px; }
     aside { width: 320px; overflow-y: auto; padding: 8px 14px 24px; border-left: 1px solid #222a3d; box-sizing: border-box; }
     h3 { margin: 16px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #8f9bb8; }
     label { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; font-size: 12px; color: #a9b3cb; }

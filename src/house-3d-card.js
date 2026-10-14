@@ -4,7 +4,7 @@ import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups } from './hass-map.js';
 import './editor.js';
 
-const VERSION = '0.3.1';
+const VERSION = '0.3.2';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {

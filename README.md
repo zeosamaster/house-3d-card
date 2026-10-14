@@ -35,7 +35,7 @@ With no `plan` yet, the card lays out a rough starter house from your HA floors 
 
 ## Editing
 
-**✎** opens a full-screen editor: storey tabs, a top-down plan (drag rooms, corner dot resizes, 5 cm snapping, rooms that touch share a wall) and an inspector. Rooms link to HA areas; lamps (`light`/`switch`) and ACs (`climate`, plus an optional temperature sensor) link to entities — each room offers its area's unplaced devices first. **Save** writes the plan into the card's own config in the dashboard; if the plan changed elsewhere since the editor opened, saving refuses instead of overwriting.
+**✎** opens a full-screen editor: storey tabs, a top-down plan (5 cm snapping, rooms that touch share a wall) and an inspector. Pinch or scroll to zoom, drag to pan, **Fit** to see everything again. On touch, tap something to select it, then drag it; with a mouse, drag directly. A room's corner dot resizes it. Rooms link to HA areas; lamps (`light`/`switch`) and ACs (`climate`, plus an optional temperature sensor) link to entities — each room offers its area's unplaced devices first. **Save** writes the plan into the card's own config in the dashboard; if the plan changed elsewhere since the editor opened, saving refuses instead of overwriting.
 
 The room sheet follows the hide/order curation of your Areas dashboard (`areas_dashboard`, default `dashboard-areas`).
 
