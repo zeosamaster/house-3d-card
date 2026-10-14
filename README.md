@@ -26,6 +26,8 @@ With no `plan` yet, the card lays out a rough starter house from your HA floors 
 | Do this | To get this |
 | --- | --- |
 | Tap a room (or its label) | Fly into it; its devices open in the side sheet |
+| Room pills | Show up when something's going on: lights on, AC running (mode + target), a door/window open (red) |
+| Dock (bottom) | Weather, who's home, solar / battery / house load — tap for details |
 | Storey chips | Pick the storey to show (starts on the ground floor; the top one shows the whole house) |
 | **Aa** | Show / hide room names (off by default, remembered per device) |
 | Tap a lamp in a room | Toggle it |
@@ -44,6 +46,9 @@ The room sheet follows the hide/order curation of your Areas dashboard (`areas_d
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `plan` | starter layout from your areas | The house — written by the editor |
+| `status` | weather/people auto | Dock entities: `weather`, `people` (list), `solar`, `battery`, `load` |
+| `car` | — | Chip over the plan's `car`: `battery` (%), `charging` (sensor or binary_sensor) |
+| `sun` | `sun.sun` | Drives the light and sky |
 | `areas_dashboard` | `dashboard-areas` | Areas dashboard whose curation the room sheet uses |
 | `height` | `calc(100vh - var(--header-height) - 16px)` | Card height |
 | `dashboard` | from the URL | Dashboard url_path the editor saves into |
