@@ -9,7 +9,7 @@ import { buildHouse } from './three/house.js';
 import { buildFurniture } from './three/furniture.js';
 import { LightUnit } from './three/lights.js';
 import { ACUnit } from './three/ac.js';
-import { roomGroup } from './plan.js';
+import { roomGroup, boundsOf } from './plan.js';
 import { createSky } from './sky.js';
 import { createGlows } from './glow.js';
 
@@ -140,9 +140,14 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
         new THREE.Vector3(Math.max(...rs.map((r) => r.bx1)), y + H * 0.75, Math.max(...rs.map((r) => r.bz1))));
       fill = 0.84;
     } else {
+      // Frame the house itself plus a few metres of garden; the rest of the plot runs off the
+      // edges (on a portrait phone, fitting the whole plot left the house tiny).
       const vis = topVisible();
       const top = Math.max(...vis.map((l) => l.cfg.elevation)) + H * 0.8;
-      box = new THREE.Box3(new THREE.Vector3(minX, 0, minZ), new THREE.Vector3(maxX, top, maxZ));
+      const indoor = levels.flatMap((l) => l.cfg.rooms).filter((r) => !r.outdoor);
+      const b = indoor.length ? boundsOf(indoor) : plan.bounds;
+      const m = 2.5;
+      box = new THREE.Box3(new THREE.Vector3(b.minX - m, 0, b.minZ - m), new THREE.Vector3(b.maxX + m, top, b.maxZ + m));
     }
     const { dist, center: c } = fitDistance(box, rig.goal.az, rig.goal.el, fill);
     rig.goal.dist = dist * rig.zoom;
@@ -411,6 +416,14 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
         }
       }
       return out;
+    },
+
+    /** Screen position of a world point, or null when it is behind the camera. */
+    project([x, y, z]) {
+      camera.updateMatrixWorld();
+      v.set(x, y, z).project(camera);
+      if (v.z > 1) return null;
+      return { x: (v.x * 0.5 + 0.5) * width, y: (-v.y * 0.5 + 0.5) * height };
     },
 
     acView(id) {

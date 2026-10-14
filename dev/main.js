@@ -14,6 +14,22 @@ for (const e of fixture.entities) {
 const [sunEl, sunAz] = (new URLSearchParams(location.search).get('sun') || '35,230').split(',').map(Number);
 states['sun.sun'] = { entity_id: 'sun.sun', state: sunEl > 0 ? 'above_horizon' : 'below_horizon', attributes: { elevation: sunEl, azimuth: sunAz } };
 
+// Synthetic status entities (weather, people, energy, car) and a busy house, so the house
+// view's pills and dock have something to show.
+const add = (entity_id, state, attributes = {}) => { states[entity_id] = { entity_id, state, attributes }; };
+add('weather.dev', 'partlycloudy', { temperature: 21.5, friendly_name: 'Weather' });
+add('person.dev_a', 'home', { friendly_name: 'Fabio' });
+add('person.dev_b', 'not_home', { friendly_name: 'Sara' });
+add('sensor.dev_solar', '2.4', { unit_of_measurement: 'kW', device_class: 'power' });
+add('sensor.dev_battery', '76', { unit_of_measurement: '%', device_class: 'battery' });
+add('sensor.dev_load', '1.3', { unit_of_measurement: 'kW', device_class: 'power' });
+add('sensor.dev_car_battery', '54', { unit_of_measurement: '%' });
+add('sensor.dev_car_charging', 'charging');
+const ac = Object.keys(states).find((e) => e.startsWith('climate.ac_sala'));
+if (ac) states[ac] = { ...states[ac], state: 'cool', attributes: { ...states[ac].attributes, temperature: 23, current_temperature: 25.5 } };
+const win = Object.keys(states).find((e) => e.startsWith('binary_sensor.') && ['window', 'door'].includes(states[e].attributes.device_class));
+if (win) states[win] = { ...states[win], state: 'on' };
+
 let hass = {
   states,
   entities: Object.fromEntries(fixture.entities.map((e) => [e.entity_id, { entity_id: e.entity_id, area_id: e.area_id }])),
@@ -58,6 +74,14 @@ class FakeTile extends HTMLElement {
   }
 }
 customElements.define('fake-tile', FakeTile);
+
+// Stand-in for HA's ha-icon: a glyph per icon family.
+const GLYPH = { lightbulb: '💡', snowflake: '❄', fire: '🔥', door: '🚪', window: '🪟', weather: '⛅', solar: '☀', battery: '🔋',
+  lightning: '⚡', car: '🚗', fan: '🌀', water: '💧' };
+customElements.define('ha-icon', class extends HTMLElement {
+  static get observedAttributes() { return ['icon']; }
+  attributeChangedCallback() { const k = Object.keys(GLYPH).find((g) => (this.getAttribute('icon') || '').includes(g)); this.textContent = GLYPH[k] || '•'; }
+});
 window.loadCardHelpers = async () => ({
   createCardElement: (c) => {
     const el = c.type === 'tile' ? document.createElement('fake-tile') : document.createElement('div');
@@ -71,7 +95,9 @@ const saved = new URLSearchParams(location.search).get('plan') === 'saved' && lo
 // dev/plan.json (gitignored), when present, is the starting plan.
 const devPlan = Object.values(import.meta.glob('./plan.json', { eager: true, import: 'default' }))[0];
 let dashboard = saved ? JSON.parse(saved)
-  : { views: [{ type: 'panel', cards: [{ type: 'custom:house-3d-card', dashboard: 'house-3d', ...(devPlan ? { plan: devPlan } : {}) }] }] };
+  : { views: [{ type: 'panel', cards: [{ type: 'custom:house-3d-card', dashboard: 'house-3d', ...(devPlan ? { plan: devPlan } : {}),
+    status: { weather: 'weather.dev', people: ['person.dev_a', 'person.dev_b'], solar: 'sensor.dev_solar', battery: 'sensor.dev_battery', load: 'sensor.dev_load' },
+    car: { battery: 'sensor.dev_car_battery', charging: 'sensor.dev_car_charging' } }] }] };
 
 const card = document.createElement('house-3d-card');
 card.setConfig(dashboard.views[0].cards[0]);

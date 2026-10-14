@@ -2,9 +2,10 @@ import { LitElement, html, css, nothing } from 'lit';
 import { normalizePlan, planFromAreas, roomGroup } from './plan.js';
 import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups } from './hass-map.js';
+import { roomStatus, dockStatus, carStatus, fmt } from './status.js';
 import './editor.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -19,6 +20,7 @@ class House3DCard extends LitElement {
     _sheet: { state: true },
     _toast: { state: true },
     _showLabels: { state: true },
+    _carAt: { state: true },
   };
 
   constructor() {
@@ -137,7 +139,52 @@ class House3DCard extends LitElement {
   }
 
   _updateLabels() {
-    if (this._stage) this._labels = this._stage.labels();
+    if (!this._stage) return;
+    this._labels = this._stage.labels();
+    // The car chip floats above the first car in the plan.
+    const lv = this._plan.levels.find((l) => l.furniture.some((f) => f.type === 'car'));
+    const car = lv?.furniture.find((f) => f.type === 'car');
+    this._carAt = car && !this._room ? this._stage.project([car.pos[0], lv.elevation + 1.9 * (car.scale || 1), car.pos[1]]) : null;
+  }
+
+  // One pill per room: its name (when names are on) plus what's going on in it right now.
+  _roomPill(l) {
+    const level = this._plan.levels.find((x) => x.id === l.level);
+    const st = roomStatus(this.hass, level, l.id);
+    if (!this._showLabels && !st.busy) return nothing;
+    const ac = st.acs[0];
+    return html`
+      <button class="pill ${st.open.length ? 'alert' : ''}" style="left:${l.x}px;top:${l.y}px" @click=${() => this._focus(l.id)}>
+        ${this._showLabels ? html`<span class="name">${l.name}</span>` : nothing}
+        ${this._showLabels && st.temp != null ? html`<span class="dim">${fmt(st.temp, '°')}</span>` : nothing}
+        ${st.lightsOn ? html`<span class="tag lit"><ha-icon icon="mdi:lightbulb-on"></ha-icon>${st.lightsOn > 1 ? st.lightsOn : ''}</span>` : nothing}
+        ${ac ? html`<span class="tag ${ac.mode === 'heat' ? 'heat' : 'cool'}"><ha-icon icon=${ac.mode === 'heat' ? 'mdi:fire' : ac.mode === 'dry' ? 'mdi:water-percent' : ac.mode === 'fan_only' ? 'mdi:fan' : 'mdi:snowflake'}></ha-icon>${ac.target != null ? fmt(ac.target, '°') : ''}</span>` : nothing}
+        ${st.open.length ? html`<span class="tag open"><ha-icon icon=${st.open.some((o) => o.kind === 'door') ? 'mdi:door-open' : 'mdi:window-open-variant'}></ha-icon>${st.open.length > 1 ? st.open.length : ''}</span>` : nothing}
+      </button>`;
+  }
+
+  _dock() {
+    const d = dockStatus(this.hass, this._config.status);
+    const info = (entity) => () => this._moreInfo(entity);
+    return html`
+      <div class="dock">
+        ${d.weather ? html`<button class="dk" @click=${info(d.weather.entity)}><ha-icon icon=${d.weather.icon}></ha-icon>${fmt(d.weather.temp, '°')}</button>` : nothing}
+        ${d.people.length ? html`<span class="dk people">${d.people.map((p) => html`
+          <button class="avatar ${p.home ? 'home' : 'away'}" title=${`${p.name} · ${p.home ? 'em casa' : 'fora'}`} @click=${info(p.entity)}
+            style=${p.picture ? `background-image:url(${p.picture})` : ''}>${p.picture ? '' : p.name.trim()[0]}</button>`)}</span>` : nothing}
+        ${d.solar ? html`<button class="dk ${d.solar.value > 0.05 ? 'sun' : ''}" @click=${info(d.solar.entity)}><ha-icon icon="mdi:solar-power-variant"></ha-icon>${fmt(d.solar.value, ` ${d.solar.unit}`)}</button>` : nothing}
+        ${d.battery ? html`<button class="dk" @click=${info(d.battery.entity)}><ha-icon icon=${d.battery.value > 80 ? 'mdi:battery-high' : d.battery.value > 30 ? 'mdi:battery-medium' : 'mdi:battery-low'}></ha-icon>${fmt(d.battery.value, '%')}</button>` : nothing}
+        ${d.load ? html`<button class="dk" @click=${info(d.load.entity)}><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon>${fmt(d.load.value, ` ${d.load.unit}`)}</button>` : nothing}
+      </div>`;
+  }
+
+  _carChip() {
+    const c = carStatus(this.hass, this._config.car);
+    if (!c || !this._carAt) return nothing;
+    return html`<button class="pill car ${c.charging ? 'charging' : ''}" style="left:${this._carAt.x}px;top:${this._carAt.y}px"
+      @click=${() => this._moreInfo(c.entity)}>
+      <ha-icon icon=${c.charging ? 'mdi:battery-charging' : 'mdi:car-electric'}></ha-icon>${c.battery != null ? fmt(c.battery, '%') : ''}
+    </button>`;
   }
 
   // Sun + every lamp's house-view glow, only when something they show changed.
@@ -272,8 +319,9 @@ class House3DCard extends LitElement {
       <div class="wrap ${this._room ? 'has-sheet' : ''}" style="height:${this._config.height || 'calc(100vh - var(--header-height, 56px) - 16px)'}">
         <div class="stage">
           <div class="canvas"></div>
-          ${this._room || !this._showLabels ? nothing : this._labels.map((l) => html`
-            <button class="label" style="left:${l.x}px;top:${l.y}px" @click=${() => this._focus(l.id)}>${l.name}</button>`)}
+          ${this._room || !this.hass ? nothing : this._labels.map((l) => this._roomPill(l))}
+          ${this._room || !this.hass ? nothing : this._carChip()}
+          ${this._room || !this.hass ? nothing : this._dock()}
           <div class="bar">
             ${this._room ? html`
               <button class="chip back" @click=${() => this._back()}>← ${plan?.name || 'Casa'}</button>
@@ -338,14 +386,36 @@ class House3DCard extends LitElement {
       border-radius: 999px; padding: 5px 12px; cursor: pointer; backdrop-filter: blur(6px); }
     .chip.on { background: #e9eefb; color: #0a0e1a; }
     .chip.icon { font-size: 15px; padding: 4px 10px; }
-    .label { position: absolute; transform: translate(-50%, -50%); font: inherit; font-size: 12px; color: #fff; background: rgba(10, 14, 26, 0.55);
-      border: 0; border-radius: 6px; padding: 2px 7px; cursor: pointer; white-space: nowrap; text-shadow: 0 1px 3px #000; }
-    .label:hover { background: rgba(80, 110, 200, 0.7); }
+    .pill { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 5px; font: inherit; font-size: 12px;
+      color: #fff; background: rgba(10, 14, 26, 0.62); border: 1px solid rgba(255,255,255,0.10); border-radius: 999px; padding: 3px 8px;
+      cursor: pointer; white-space: nowrap; backdrop-filter: blur(6px); box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
+    .pill:hover { background: rgba(60, 86, 170, 0.8); }
+    .pill .name { font-weight: 500; }
+    .pill .dim { opacity: 0.7; }
+    .pill.alert { border-color: rgba(255, 99, 99, 0.7); }
+    .tag { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; }
+    .tag ha-icon, .dk ha-icon, .pill ha-icon { --mdc-icon-size: 15px; width: 15px; height: 15px; display: inline-flex; }
+    .tag.lit { color: #ffd27a; }
+    .tag.cool { color: #7cc4ff; }
+    .tag.heat { color: #ff9a5a; }
+    .tag.open { color: #ff7b7b; }
+    .pill.car { gap: 3px; font-weight: 600; }
+    .pill.car.charging { color: #8ef0a8; border-color: rgba(142, 240, 168, 0.6); }
+    .dock { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap; max-width: calc(100% - 20px); }
+    .dk { display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: 13px; font-weight: 500; color: #eef1f8;
+      background: rgba(10, 14, 26, 0.62); border: 1px solid rgba(255,255,255,0.10); border-radius: 999px; padding: 4px 10px;
+      backdrop-filter: blur(6px); cursor: pointer; }
+    .dk.sun { color: #ffd27a; }
+    .dk.people { gap: 4px; padding: 3px 5px; cursor: default; }
+    .avatar { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; font: inherit; font-size: 11px; font-weight: 700;
+      color: #0a0e1a; background: #cfd6e6 center/cover; padding: 0; cursor: pointer; }
+    .avatar.home { border-color: #6ee7a0; }
+    .avatar.away { opacity: 0.45; filter: grayscale(1); }
     .error, .hint, .toast { position: absolute; left: 50%; transform: translateX(-50%); background: rgba(20, 26, 42, 0.92); color: #eef1f8;
       border-radius: 10px; padding: 10px 14px; font-size: 13px; max-width: 80%; }
     .error { top: 30%; border: 1px solid #e05252; }
     .error p { margin: 6px 0 0; white-space: pre-wrap; }
-    .hint { bottom: 14px; }
+    .hint { bottom: 56px; }
     .toast { bottom: 54px; }
     .sheet { width: 380px; flex: none; overflow-y: auto; background: var(--card-background-color, #1c1f26); padding: 12px 12px 24px; box-sizing: border-box; }
     .sheet header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -354,6 +424,10 @@ class House3DCard extends LitElement {
     .climate { color: var(--secondary-text-color); font-size: 14px; }
     .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .note { color: var(--secondary-text-color); }
+    @media (max-width: 500px) {
+      .dk { font-size: 12px; padding: 3px 8px; }
+      .dock { gap: 4px; left: 8px; bottom: 8px; }
+    }
     @media (max-width: 800px), (orientation: portrait) and (max-width: 1100px) {
       .wrap.has-sheet { flex-direction: column; }
       .wrap.has-sheet .stage { flex: 0 0 52%; }
