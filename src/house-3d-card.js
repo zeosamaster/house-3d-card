@@ -6,7 +6,7 @@ import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp, a
 import { strings } from './i18n.js';
 import './editor.js';
 
-const VERSION = '0.13.0';
+const VERSION = '0.14.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -26,6 +26,7 @@ class House3DCard extends LitElement {
     _sheetBig: { state: true },
     _heat: { state: true },
     _away: { state: true },
+    _ambient: { state: true },
   };
 
   constructor() {
@@ -59,11 +60,15 @@ class House3DCard extends LitElement {
   // house view slowly orbits — meant for the always-on kitchen tablet.
   _poke() {
     this._stage?.setIdleOrbit(false);
+    if (this._ambient) this._ambient = false;
     clearTimeout(this._idleTimer);
     const secs = this._config?.idle_orbit ?? 180;
     if (!secs) return;
     this._idleTimer = setTimeout(() => {
-      if (!this._room && !this._editing && !document.hidden) this._stage?.setIdleOrbit(true);
+      if (this._room || this._editing || document.hidden) return;
+      this._stage?.setIdleOrbit(true);
+      // Ambient mode (wall tablets): the controls fade away and a big clock takes the sky.
+      if (this._config?.ambient !== false) this._ambient = true;
     }, secs * 1000);
   }
 
@@ -199,6 +204,27 @@ class House3DCard extends LitElement {
     const car = lv?.furniture.find((f) => f.type === 'car');
     const at = car && !this._room ? this._stage.project([car.pos[0], lv.elevation + 1.9 * (car.scale || 1), car.pos[1]]) : null;
     if (Math.round(at?.x) !== Math.round(this._carAt?.x) || Math.round(at?.y) !== Math.round(this._carAt?.y)) this._carAt = at;
+  }
+
+  // The ambient clock: time, date in the viewer's language, the weather. Re-rendered by the
+  // 30 s tick while shown.
+  _clock() {
+    if (!this._clockTick) this._clockTick = setInterval(() => (this._ambient ? this.requestUpdate() : (clearInterval(this._clockTick), this._clockTick = null)), 15000);
+    const lang = this._config.language || this.hass.locale?.language || 'en';
+    const now = new Date();
+    const time = new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' }).format(now);
+    const raw = new Intl.DateTimeFormat(lang, { weekday: 'long', day: 'numeric', month: 'long' }).format(now);
+    const date = raw.charAt(0).toUpperCase() + raw.slice(1); // "Quinta-feira, 15 de outubro", not Title Case
+    const d = this._dockMemo?.d || dockStatus(this.hass, this._statusCfg());
+    const home = d.people?.filter((p) => p.home).map((p) => p.name.split(' ')[0]);
+    return html`<div class="clock">
+      <div class="time">${time}</div>
+      <div class="date">${date}</div>
+      <div class="sub">
+        ${d.weather ? html`<span><ha-icon icon=${d.weather.icon}></ha-icon>${fmt(d.weather.temp, '°')}</span>` : nothing}
+        ${home?.length ? html`<span><ha-icon icon="mdi:home-heart"></ha-icon>${home.join(' · ')}</span>` : nothing}
+      </div>
+    </div>`;
   }
 
   // Pills that would overlap (small phone screens) are nudged down; ~84×24 px each.
@@ -510,9 +536,10 @@ class House3DCard extends LitElement {
     const hum = area && this._reading(area.humidity_entity_id, '%');
 
     return html`
-      <div class="wrap ${this._room ? 'has-sheet' : ''}" style="height:${this._config.height || 'calc(100vh - var(--header-height, 56px) - 16px)'}">
+      <div class="wrap ${this._room ? 'has-sheet' : ''} ${this._ambient ? 'ambient' : ''}" style="height:${this._config.height || 'calc(100vh - var(--header-height, 56px) - 16px)'}">
         <div class="stage">
           <div class="canvas"></div>
+          ${this._ambient && this.hass ? this._clock() : nothing}
           ${this._room || !this.hass ? nothing : this._spread(this._labels).map((l) => this._roomPill(l))}
           ${this._room || !this.hass ? nothing : this._carChip()}
           ${this._room || !this.hass ? nothing : this._dock()}
@@ -626,6 +653,16 @@ class House3DCard extends LitElement {
     .error p { margin: 6px 0 0; white-space: pre-wrap; }
     .hint { bottom: 56px; }
     .toast { display: flex; align-items: center; gap: 12px; }
+    .clock { position: absolute; left: 0; right: 0; top: 7%; text-align: center; color: #fff; pointer-events: none;
+      text-shadow: 0 2px 18px rgba(0,0,0,0.45); animation: fadein 1.2s ease; }
+    .clock .time { font-size: clamp(56px, 12vw, 132px); font-weight: 200; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .clock .date { font-size: clamp(16px, 2.4vw, 26px); font-weight: 400; opacity: 0.9; margin-top: 8px; }
+    .clock .sub { display: flex; gap: 18px; justify-content: center; margin-top: 10px; font-size: clamp(14px, 1.8vw, 20px); opacity: 0.9; }
+    .clock .sub span { display: inline-flex; align-items: center; gap: 6px; }
+    .clock ha-icon { --mdc-icon-size: 1.2em; width: 1.2em; height: 1.2em; display: inline-flex; }
+    @keyframes fadein { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+    .wrap .bar, .wrap .pill { transition: opacity 0.8s ease; }
+    .wrap.ambient .bar, .wrap.ambient .pill, .wrap.ambient .fab { opacity: 0; pointer-events: none; }
     .fab { position: absolute; right: 12px; top: 58px; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
       color: #eef1f8; background: rgba(10, 14, 26, 0.72); border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(6px);
       box-shadow: 0 4px 14px rgba(0,0,0,0.35); cursor: pointer; padding: 0; }
