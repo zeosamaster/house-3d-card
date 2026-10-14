@@ -37,7 +37,9 @@ With no `plan` yet, the card lays out a rough starter house from your HA floors 
 | Tap a lamp in a room | Toggle it |
 | Long-press a lamp / tap an AC | Home Assistant's device dialog |
 | `← Casa`, Back | Back to the whole house (the room is in the URL: `#room=sala`) |
-| Drag / pinch / scroll | Orbit all the way round / zoom — walls facing you are cut away as you turn |
+| Touch | Like a map: one finger pans, two fingers pinch to zoom, twist to rotate (walls facing you are cut away as you turn). Phones start zoomed in on the house |
+| Mouse | Left-drag orbits (and tilts), right-drag or Shift-drag pans, the wheel zooms |
+| ⌖ (top right, once you've moved) | Back to the start view |
 
 ## Editing
 

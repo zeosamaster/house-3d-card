@@ -20,8 +20,8 @@ const rad = THREE.MathUtils.degToRad;
 const clamp = THREE.MathUtils.clamp;
 const EL_MIN = 22;
 const EL_MAX = 75;
-const ZOOM_MIN = 0.35;
-const ZOOM_MAX = 1.4;
+const ZOOM_MIN = 0.22;
+const ZOOM_MAX = 1.6;
 const LONG_PRESS_MS = 500;
 const WALL_SIDE = { north: -14, west: 14, south: 0, east: 0 };
 
@@ -114,7 +114,10 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   const rig = {
     az: baseAz, el: plan.camera.elevation, dist: 40, target: center.clone(),
     goal: { az: baseAz, el: plan.camera.elevation, dist: 40, target: center.clone() }, zoom: 1,
+    pan: new THREE.Vector3(), // where the user dragged the view to, on the ground plane
   };
+  // Phones start close: the house fills the screen and a finger pans around it.
+  const homeZoom = () => (room ? 1 : camera.aspect < 0.8 ? 0.66 : camera.aspect < 1.3 ? 0.85 : 1);
   let width = 1;
   let height = 1;
   const v = new THREE.Vector3();
@@ -166,7 +169,23 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     }
     const { dist, center: c } = fitDistance(box, rig.goal.az, rig.goal.el, fill);
     rig.goal.dist = dist * rig.zoom;
-    rig.goal.target.copy(c);
+    // Panned, but never so far that the house is lost.
+    const pb = plan.bounds;
+    rig.pan.x = clamp(rig.pan.x, pb.minX - 2 - c.x, pb.maxX + 2 - c.x);
+    rig.pan.z = clamp(rig.pan.z, pb.minZ - 2 - c.z, pb.maxZ + 2 - c.z);
+    rig.goal.target.copy(c).add(rig.pan);
+  }
+
+  // A drag of (dx, dy) screen pixels, as a move of the ground plane under the finger.
+  function panBy(start, dx, dy, az = rig.goal.az) {
+    const wpp = (2 * rig.dist * Math.tan(rad(camera.fov / 2))) / height;
+    const a = rad(az);
+    const sinEl = Math.max(0.35, Math.sin(rad(rig.el)));
+    rig.pan.set(
+      start.x - Math.cos(a) * dx * wpp - Math.sin(a) * (dy * wpp) / sinEl,
+      0,
+      start.z + Math.sin(a) * dx * wpp - Math.cos(a) * (dy * wpp) / sinEl,
+    );
   }
 
   function updateRig(dt, instant = false) {
@@ -249,22 +268,32 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     return hit;
   }
 
+  // Touch works like a map: one finger pans, two fingers pinch-zoom, twist to rotate and pan
+  // together. A mouse orbits with the left button (3D-viewer habit), pans with the right
+  // button or Shift, and zooms with the wheel. A tap picks; a long press on a device opens it.
   const fingers = new Map();
-  let pinch = null;
+  let multi = null;
   let drag = null;
   let press = null;
-  const spread = () => {
+  const two = () => {
     const [a, b] = [...fingers.values()];
-    return Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    return { mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, spread: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), angle: Math.atan2(b.y - a.y, b.x - a.x) };
   };
 
   canvas.addEventListener('pointerdown', (ev) => {
-    canvas.setPointerCapture(ev.pointerId);
+    try { canvas.setPointerCapture(ev.pointerId); } catch { /* synthetic */ }
     fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     clearTimeout(press?.timer);
-    if (fingers.size === 2) { pinch = { spread: spread(), zoom: rig.zoom }; drag = null; press = null; return; }
+    if (fingers.size === 2) {
+      const g = two();
+      multi = { ...g, zoom: rig.zoom, az: rig.goal.az, pan: rig.pan.clone() };
+      drag = null;
+      press = null;
+      return;
+    }
     if (fingers.size > 2) return;
-    drag = { x: ev.clientX, y: ev.clientY, az: rig.goal.az, el: rig.goal.el, moved: false };
+    const orbit = ev.pointerType === 'mouse' && ev.button === 0 && !ev.shiftKey;
+    drag = { x: ev.clientX, y: ev.clientY, az: rig.goal.az, el: rig.goal.el, pan: rig.pan.clone(), orbit, moved: false };
     const t = pick(ev);
     press = t && t.kind !== 'room' ? {
       t, fired: false,
@@ -273,25 +302,37 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   });
   canvas.addEventListener('pointermove', (ev) => {
     if (fingers.has(ev.pointerId)) fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-    if (pinch) {
-      if (fingers.size >= 2) { rig.zoom = clamp(pinch.zoom * pinch.spread / spread(), ZOOM_MIN, ZOOM_MAX); frameGoal(); wake(); }
+    if (multi) {
+      if (fingers.size < 2) return;
+      const g = two();
+      rig.zoom = clamp(multi.zoom * multi.spread / g.spread, ZOOM_MIN, ZOOM_MAX);
+      let turn = g.angle - multi.angle;
+      turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+      rig.goal.az = multi.az + THREE.MathUtils.radToDeg(turn);
+      panBy(multi.pan, g.mid.x - multi.mid.x, g.mid.y - multi.mid.y, rig.goal.az);
+      frameGoal();
+      wake();
+      onMove?.();
       return;
     }
     if (!drag) return;
     const dx = ev.clientX - drag.x;
     const dy = ev.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) > 6) { drag.moved = true; clearTimeout(press?.timer); }
-    if (drag.moved) {
+    if (!drag.moved) return;
+    if (drag.orbit) {
       rig.goal.az = drag.az - dx * 0.35; // orbit all the way round
       rig.goal.el = clamp(drag.el + dy * 0.3, EL_MIN, EL_MAX);
-      frameGoal();
-      wake();
+    } else {
+      panBy(drag.pan, dx, dy);
     }
+    frameGoal();
+    wake();
   });
   canvas.addEventListener('pointerup', (ev) => {
     fingers.delete(ev.pointerId);
     clearTimeout(press?.timer);
-    if (pinch) { if (!fingers.size) pinch = null; return; }
+    if (multi) { if (!fingers.size) multi = null; return; } // lifting after a pinch picks nothing
     if (!drag) return;
     const moved = drag.moved;
     drag = null;
@@ -305,7 +346,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   canvas.addEventListener('pointercancel', (ev) => {
     fingers.delete(ev.pointerId);
     clearTimeout(press?.timer);
-    if (!fingers.size) pinch = null;
+    if (!fingers.size) multi = null;
     drag = null;
   });
   canvas.addEventListener('wheel', (ev) => {
@@ -369,6 +410,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
 
   applyVisibility();
   resize();
+  rig.zoom = homeZoom();
+  frameGoal();
   updateRig(0, true);
   if (intro) {
     // First load: start high and swung round, then ease down into the view.
@@ -385,7 +428,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     setPeel(levelId) {
       peel = levelId;
       applyVisibility();
-      rig.zoom = 1;
+      rig.zoom = homeZoom();
       frameGoal();
       wake();
     },
@@ -395,7 +438,25 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
         ? { ...next, ids: roomGroup(levelOf(next.level).cfg, next.id).map((r) => r.id) } : null;
       buildUnits();
       applyVisibility();
-      rig.zoom = 1;
+      rig.pan.set(0, 0, 0);
+      rig.zoom = homeZoom();
+      rig.goal.el = room ? Math.max(plan.camera.elevation, 50) : plan.camera.elevation;
+      frameGoal();
+      wake(4);
+    },
+
+    /** True when the view was panned, zoomed or turned away from where it starts. */
+    isAway() {
+      return rig.pan.lengthSq() > 0.25 || Math.abs(rig.zoom - homeZoom()) > 0.04 || Math.abs(((rig.goal.az - baseAz) % 360 + 540) % 360 - 180) > 3;
+    },
+
+    /** Back to the starting view (keeps the storey / room). */
+    recenter() {
+      rig.pan.set(0, 0, 0);
+      rig.zoom = homeZoom();
+      // turn back the short way round
+      const d = ((rig.goal.az - baseAz) % 360 + 540) % 360 - 180;
+      rig.goal.az -= d;
       rig.goal.el = room ? Math.max(plan.camera.elevation, 50) : plan.camera.elevation;
       frameGoal();
       wake(4);
