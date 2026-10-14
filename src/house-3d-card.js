@@ -6,7 +6,7 @@ import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp, a
 import { strings } from './i18n.js';
 import './editor.js';
 
-const VERSION = '0.10.1';
+const VERSION = '0.11.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
