@@ -57,6 +57,7 @@ The room sheet follows the hide/order curation of your Areas dashboard (`areas_d
 | `car` | — | Chip over the plan's `car`: `battery` (%), `charging` (sensor or binary_sensor) |
 | `sun` | `sun.sun` | Drives the light and sky (cloud cover from the `status.weather` entity greys it) |
 | `idle_orbit` | `180` | Seconds without a touch before the house view slowly orbits (wall tablets); `false` turns it off |
+| `ambient` | `true` | With the idle orbit, fade the controls and show a big clock, the date, the weather and who's home (a wall-tablet screensaver); `false` keeps just the orbit |
 | `areas_dashboard` | `dashboard-areas` | Areas dashboard whose curation the room sheet uses |
 | `height` | `calc(100vh - var(--header-height) - 16px)` | Card height |
 | `dashboard` | from the URL | Dashboard url_path the editor saves into |
