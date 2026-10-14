@@ -390,6 +390,10 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   let running = false;
   let shadowFrames = 3;
   let settled = false;
+  // Adaptive resolution: a device that can't keep up while the view moves draws fewer pixels
+  // rather than stutter. Only ever steps down, for this stage's lifetime.
+  let maxPR = 1.75;
+  let slow = { ema: 16, n: 0 };
 
   function wake(frames = 2) {
     awake = Math.max(awake, frames);
@@ -404,8 +408,17 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     raf = 0;
     // the orbit alone draws ~15 fps; rain ~25
     if ((orbit || life.busy) && awake === 0 && now - last < (life.busy ? 40 : 66)) { raf = requestAnimationFrame(frame); return; }
-    const dt = Math.min(0.07, (now - last) / 1000);
+    const gap = now - last;
+    const dt = Math.min(0.07, gap / 1000);
     last = now;
+    if (!orbit && !life.busy) { // a chain of back-to-back frames: the view is moving
+      slow.ema = slow.ema * 0.9 + gap * 0.1;
+      if (++slow.n > 40 && slow.ema > 30 && maxPR > 1) {
+        maxPR = Math.max(1, maxPR - 0.3);
+        slow = { ema: 16, n: 0 };
+        resize();
+      }
+    }
     if (orbit) rig.goal.az += dt * ORBIT_DEG_PER_S;
     const moving = updateRig(dt) || orbit || life.busy;
     life.tick(dt);
@@ -427,7 +440,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     if (!r.width || !r.height) return;
     width = r.width;
     height = r.height;
-    const pr = Math.min(window.devicePixelRatio || 1, 1.75);
+    const pr = Math.min(window.devicePixelRatio || 1, maxPR);
     renderer.setPixelRatio(pr);
     renderer.setSize(width, height, false);
     composer.setPixelRatio(pr);
