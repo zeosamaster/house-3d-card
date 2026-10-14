@@ -10,6 +10,8 @@ import { buildFurniture } from './three/furniture.js';
 import { LightUnit } from './three/lights.js';
 import { ACUnit } from './three/ac.js';
 import { roomGroup } from './plan.js';
+import { createSky } from './sky.js';
+import { createGlows } from './glow.js';
 
 export const STAGE_BG = '#0a0e1a';
 const rad = THREE.MathUtils.degToRad;
@@ -38,7 +40,6 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
   const center = new THREE.Vector3((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
   const span = Math.max(maxX - minX, maxZ - minZ, 6);
   const baseAz = plan.camera.azimuth;
-  const camDir = new THREE.Vector3(Math.sin(rad(baseAz)), 0, Math.cos(rad(baseAz)));
 
   /* ---------- content: one group per storey ---------- */
 
@@ -55,26 +56,17 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
 
   // One plinth under the whole footprint.
   const plinth = new THREE.Mesh(new THREE.BoxGeometry(maxX - minX + 1.2, 0.3, maxZ - minZ + 1.2),
-    new THREE.MeshStandardMaterial({ color: '#141927', roughness: 0.9 }));
+    new THREE.MeshStandardMaterial({ color: '#46503c', roughness: 1 })); // earth: reads as ground by day, dark at night
   plinth.position.set(center.x, -0.155, center.z);
   plinth.receiveShadow = true;
   scene.add(plinth);
 
-  const hemi = new THREE.HemisphereLight(0x8ea6ff, 0x0b0e17, 0.9);
-  scene.add(hemi);
-  const moon = new THREE.DirectionalLight(0xa9c0ff, 0.9);
-  moon.position.copy(center).add(new THREE.Vector3(camDir.x * 6 + 3, 25, camDir.z * 6 - 3));
-  moon.target.position.copy(center);
-  moon.castShadow = true;
-  moon.shadow.mapSize.set(2048, 2048);
-  const sc = moon.shadow.camera;
-  sc.left = sc.bottom = -span * 0.9;
-  sc.right = sc.top = span * 0.9;
-  sc.near = 1;
-  sc.far = 80;
-  moon.shadow.bias = -0.0008;
-  moon.shadow.normalBias = 0.04;
-  scene.add(moon, moon.target);
+  // Light comes from the real sun (sun.sun) by day and a soft moon at night; see sky.js.
+  const sky = createSky(scene, center, span);
+  sky.setNorth(plan.north);
+  sky.update();
+  // Whole-house view: glowing bulbs + pools of light for every lamp that's on; see glow.js.
+  const glows = createGlows(levels, H);
 
   const target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
@@ -97,9 +89,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
   function applyVisibility() {
     const visible = new Set(topVisible());
     for (const l of levels) l.group.visible = visible.has(l);
-    // House view is a daylight overview; a room view dims so its lamps carry the scene.
-    hemi.intensity = room ? 0.5 : 2.2;
-    moon.intensity = room ? 0.7 : 2.4;
+    sky.update({ dim: Boolean(room) });
+    glows.hide(new Set(units.filter((u) => u.kind === 'light').map((u) => u.id)));
     shadowFrames = 3;
   }
 
@@ -376,6 +367,22 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
       frameGoal();
       wake(4);
     },
+
+    /** HA's sun.sun elevation/azimuth (degrees). */
+    setSun(elevation, azimuth) {
+      if (!sky.update({ elevation, azimuth, dim: Boolean(room) })) return;
+      glows.setDaylight(sky.daylight);
+      shadowFrames = 3;
+      wake();
+    },
+
+    // state(cfg) → { on, brightness, temp, color } for every lamp's house-view glow.
+    applyGlows(state) {
+      glows.apply(state);
+      wake();
+    },
+
+    glowEntities: () => glows.entities(),
 
     // state(kind, cfg) → the unit's state; called on every hass update.
     applyStates(state, { instant = false } = {}) {

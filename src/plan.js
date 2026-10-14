@@ -75,6 +75,8 @@ export function normalizePlan(raw) {
     wallHeight,
     interiorWallHeight,
     camera: { azimuth: raw.camera?.azimuth ?? 34, elevation: raw.camera?.elevation ?? 47 },
+    // Plan direction [x, z] that faces real north (default: up the plan, -z).
+    north: Array.isArray(raw.north) && raw.north.length === 2 && raw.north.some(Boolean) ? raw.north : [0, -1],
     levels,
     bounds: boundsOf(levels.flatMap((l) => l.rooms)),
   };

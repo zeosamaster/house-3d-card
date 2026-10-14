@@ -10,6 +10,9 @@ const states = {};
 for (const e of fixture.entities) {
   states[e.entity_id] = { entity_id: e.entity_id, state: e.state, attributes: e.attributes, last_changed: '' };
 }
+// ?sun=elevation,azimuth (degrees) to look at any time of day; default mid-afternoon.
+const [sunEl, sunAz] = (new URLSearchParams(location.search).get('sun') || '35,230').split(',').map(Number);
+states['sun.sun'] = { entity_id: 'sun.sun', state: sunEl > 0 ? 'above_horizon' : 'below_horizon', attributes: { elevation: sunEl, azimuth: sunAz } };
 
 let hass = {
   states,
