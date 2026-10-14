@@ -6,22 +6,29 @@ import { roomGroup } from './plan.js';
 const OPENINGS = ['door', 'window', 'opening', 'garage_door'];
 const num = (st) => { const n = parseFloat(st?.state); return Number.isFinite(n) ? n : null; };
 
-// Contact sensors by area, rebuilt only when HA's entity registry object changes.
-let openingIndex = { entities: null, byArea: new Map() };
-function openingsByArea(hass) {
-  if (openingIndex.entities === hass.entities) return openingIndex.byArea;
-  const byArea = new Map();
+// Sensors by area from the registries alone (an entity's own area, else its device's), rebuilt
+// whenever HA replaces the entity or device registry objects. Which ones are doors/windows or
+// thermometers is decided on read: states and device classes change; the registry index doesn't.
+let sensorIndex = { entities: null, devices: null, binary: new Map(), sensor: new Map() };
+function sensorsByArea(hass) {
+  if (sensorIndex.entities === hass.entities && sensorIndex.devices === hass.devices) return sensorIndex;
+  const binary = new Map();
+  const sensor = new Map();
   for (const [id, e] of Object.entries(hass.entities || {})) {
-    if (!id.startsWith('binary_sensor.') || e.hidden || e.entity_category) continue;
-    if (!OPENINGS.includes(hass.states[id]?.attributes?.device_class)) continue;
+    const into = id.startsWith('binary_sensor.') ? binary : id.startsWith('sensor.') ? sensor : null;
+    if (!into || e.hidden || e.entity_category) continue;
     const area = entityArea(hass, id);
     if (!area) continue;
-    if (!byArea.has(area)) byArea.set(area, []);
-    byArea.get(area).push(id);
+    if (!into.has(area)) into.set(area, []);
+    into.get(area).push(id);
   }
-  openingIndex = { entities: hass.entities, byArea };
-  return byArea;
+  sensorIndex = { entities: hass.entities, devices: hass.devices, binary, sensor };
+  return sensorIndex;
 }
+const openingsIn = (hass, area) => (sensorsByArea(hass).binary.get(area) || [])
+  .filter((id) => OPENINGS.includes(hass.states[id]?.attributes?.device_class));
+const thermometersIn = (hass, area) => (sensorsByArea(hass).sensor.get(area) || [])
+  .filter((id) => hass.states[id]?.attributes?.device_class === 'temperature');
 
 /** Status of the room `roomId` on `level`: lights on, running ACs, open doors/windows, temperature. */
 export function roomStatus(hass, level, roomId) {
@@ -33,26 +40,9 @@ export function roomStatus(hass, level, roomId) {
   const acs = level.acs.filter((a) => ids.has(a.room) && a.entity).map((a) => hass.states[a.entity])
     .filter((st) => st && isOn(st))
     .map((st) => ({ mode: st.state, target: st.attributes.temperature, current: st.attributes.current_temperature }));
-  const open = area ? (openingsByArea(hass).get(area) || []).filter((id) => hass.states[id]?.state === 'on')
+  const open = area ? openingsIn(hass, area).filter((id) => hass.states[id]?.state === 'on')
     .map((id) => ({ id, kind: hass.states[id].attributes.device_class === 'window' ? 'window' : 'door' })) : [];
   return { lightsOn, acs, open, temp: roomTemp(hass, level, ids, area), busy: lightsOn > 0 || acs.length > 0 || open.length > 0 };
-}
-
-// Temperature sensors by area (registry-based), rebuilt with the entity registry.
-let tempIndex = { entities: null, byArea: new Map() };
-function tempsByArea(hass) {
-  if (tempIndex.entities === hass.entities) return tempIndex.byArea;
-  const byArea = new Map();
-  for (const [id, e] of Object.entries(hass.entities || {})) {
-    if (!id.startsWith('sensor.') || e.hidden || e.entity_category) continue;
-    if (hass.states[id]?.attributes?.device_class !== 'temperature') continue;
-    const area = entityArea(hass, id);
-    if (!area) continue;
-    if (!byArea.has(area)) byArea.set(area, []);
-    byArea.get(area).push(id);
-  }
-  tempIndex = { entities: hass.entities, byArea };
-  return byArea;
 }
 
 /** The room's temperature: the area's chosen sensor, else any working temperature sensor in
@@ -62,7 +52,7 @@ export function roomTemp(hass, level, ids, area) {
   if (chosen != null) return chosen;
   // Outdoors, "any sensor in the area" picks up things like a car's cabin; only an explicit choice counts.
   if (level.rooms.some((r) => ids.has(r.id) && r.outdoor)) return null;
-  for (const id of (area && tempsByArea(hass).get(area)) || []) {
+  for (const id of area ? thermometersIn(hass, area) : []) {
     const v = num(hass.states[id]);
     if (v != null) return v;
   }
