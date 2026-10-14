@@ -7,7 +7,7 @@ import { strings } from './i18n.js';
 import { loadHistory, stateAt, sunPosition, skyGradient } from './replay.js';
 import './editor.js';
 
-const VERSION = '0.17.0';
+const VERSION = '0.18.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -177,6 +177,7 @@ class House3DCard extends LitElement {
     if (id && this._replay) this._stopReplay();
     const found = id ? this._roomCfg(id) : null;
     if (!found) this._sheetBig = false;
+    if (found && push) haptic('selection');
     this._room = found ? { id, level: found.level.id, name: found.room.name, area: found.room.area } : null;
     this._stage.focusRoom(this._room);
     this._watched = new Map();
@@ -220,12 +221,21 @@ class House3DCard extends LitElement {
     const date = raw.charAt(0).toUpperCase() + raw.slice(1); // "Quinta-feira, 15 de outubro", not Title Case
     const d = this._dockMemo?.d || dockStatus(this.hass, this._statusCfg());
     const home = d.people?.filter((p) => p.home).map((p) => p.name.split(' ')[0]);
+    // The house in one line: what's open (or that it's all shut) and how many lights are on.
+    const rooms = this._labels.map((l) => ({ name: l.name, st: this._statusOf(this._plan.levels.find((x) => x.id === l.level), l.id) }));
+    const open = rooms.filter((r) => r.st.open.length).map((r) => r.name);
+    const lit = rooms.reduce((n, r) => n + r.st.lightsOn, 0);
     return html`<div class="clock">
       <div class="time">${time}</div>
       <div class="date">${date}</div>
       <div class="sub">
         ${d.weather ? html`<span><ha-icon icon=${d.weather.icon}></ha-icon>${fmt(d.weather.temp, '°')}</span>` : nothing}
         ${home?.length ? html`<span><ha-icon icon="mdi:home-heart"></ha-icon>${home.join(' · ')}</span>` : nothing}
+      </div>
+      <div class="sub">
+        ${open.length ? html`<span class="warn"><ha-icon icon="mdi:door-open"></ha-icon>${open.join(' · ')}</span>`
+          : html`<span><ha-icon icon="mdi:shield-home-outline"></ha-icon>${this._t.allShut}</span>`}
+        ${lit ? html`<span><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon>${this._t.lightsOnN(lit)}</span>` : nothing}
       </div>
     </div>`;
   }
@@ -732,12 +742,14 @@ class House3DCard extends LitElement {
     .error p { margin: 6px 0 0; white-space: pre-wrap; }
     .hint { bottom: 56px; }
     .toast { display: flex; align-items: center; gap: 12px; }
-    .clock { position: absolute; left: 0; right: 0; top: 7%; text-align: center; color: #fff; pointer-events: none;
+    .clock { position: absolute; left: 0; right: 0; top: calc(7% - 24px); padding: 24px 0 36px; text-align: center; color: #fff; pointer-events: none;
+      background: radial-gradient(42% 60% at 50% 48%, rgba(6, 9, 18, 0.42), transparent);
       text-shadow: 0 2px 18px rgba(0,0,0,0.45); animation: fadein 1.2s ease; }
     .clock .time { font-size: clamp(56px, 12vw, 132px); font-weight: 200; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
     .clock .date { font-size: clamp(16px, 2.4vw, 26px); font-weight: 400; opacity: 0.9; margin-top: 8px; }
     .clock .sub { display: flex; gap: 18px; justify-content: center; margin-top: 10px; font-size: clamp(14px, 1.8vw, 20px); opacity: 0.9; }
     .clock .sub span { display: inline-flex; align-items: center; gap: 6px; }
+    .clock .sub .warn { color: #ffbf7a; }
     .clock ha-icon { --mdc-icon-size: 1.2em; width: 1.2em; height: 1.2em; display: inline-flex; }
     @keyframes fadein { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
     .wrap .bar, .wrap .pill { transition: opacity 0.8s ease; }
@@ -795,8 +807,10 @@ class House3DCard extends LitElement {
   `;
 }
 
-// A short tick on phones that support it (Android Companion app); silent elsewhere.
-function haptic() {
+// A short tick on phones: HA forwards its 'haptic' event to the Companion apps (iOS and
+// Android); a mobile browser vibrates instead. Silent elsewhere.
+function haptic(type = 'light') {
+  window.dispatchEvent(new CustomEvent('haptic', { detail: type }));
   try { navigator.vibrate?.(12); } catch { /* not supported */ }
 }
 

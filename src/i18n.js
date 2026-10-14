@@ -7,7 +7,7 @@ const STR = {
     roomNames: 'Room names', temps: 'Temperatures', everyOff: 'Turn off every light', roomOff: "Turn this room's lights off",
     noArea: 'This room is not linked to an HA area.', areaGone: 'Area not found.', loading: 'Loading…',
     starter: 'Starter layout from your HA areas — tap ✎ to arrange the rooms.', saved: 'Plan saved',
-    recenter: 'Back to the start view', replay: 'Replay the last 24 hours', live: 'Live', home: 'home', away: 'away', done: 'done', error: 'error', min: 'min', editHouse: 'Edit house',
+    allShut: 'All shut', lightsOnN: (n) => `${n} ${n === 1 ? 'light' : 'lights'} on`, recenter: 'Back to the start view', replay: 'Replay the last 24 hours', live: 'Live', home: 'home', away: 'away', done: 'done', error: 'error', min: 'min', editHouse: 'Edit house',
   },
   pt: {
     lights: 'Luzes', climate: 'Clima', covers: 'Portas e janelas', media_players: 'Multimédia', security: 'Segurança', others: 'Outros',
@@ -16,7 +16,7 @@ const STR = {
     roomNames: 'Nomes das divisões', temps: 'Temperaturas', everyOff: 'Apagar todas as luzes', roomOff: 'Apagar as luzes desta divisão',
     noArea: 'Esta divisão não está ligada a uma área do HA.', areaGone: 'Área não encontrada.', loading: 'A carregar…',
     starter: 'Planta inicial a partir das áreas do HA — toque em ✎ para arrumar as divisões.', saved: 'Planta guardada',
-    recenter: 'Voltar à vista inicial', replay: 'Rever as últimas 24 horas', live: 'Agora', home: 'em casa', away: 'fora', done: 'pronta', error: 'erro', min: 'min', editHouse: 'Editar casa',
+    allShut: 'Tudo fechado', lightsOnN: (n) => `${n} ${n === 1 ? 'luz acesa' : 'luzes acesas'}`, recenter: 'Voltar à vista inicial', replay: 'Rever as últimas 24 horas', live: 'Agora', home: 'em casa', away: 'fora', done: 'pronta', error: 'erro', min: 'min', editHouse: 'Editar casa',
   },
 };
 
