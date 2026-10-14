@@ -2,6 +2,7 @@
 // centred on its footprint and facing +z; the plan's "rot" turns it from there.
 import * as THREE from 'three';
 import { box, cyl, mat, at, rng } from './kit.js';
+import { stairs, stairsFootprint } from './stairs.js';
 
 const WOOD = '#a98459';
 const DARK_WOOD = '#5a4334';
@@ -63,6 +64,7 @@ function doorLines(width, height, y, z, count, material) {
 }
 
 const builders = {
+  stairs,
 
   // A Tesla Model Y-ish crossover: extruded side profile, glass greenhouse, four wheels.
   car({ color = '#e8e8ea' }) {
@@ -385,6 +387,7 @@ function baseFootprint(item) {
     case 'fridge': return [0.7, 0.68];
     case 'bed': return [(w || 1.6) + 0.1, 2.14];
     case 'car': return [1.95, 4.75];
+    case 'stairs': return stairsFootprint(item);
     case 'nightstand': return [0.46, 0.4];
     case 'dresser': return [w || 1.3, 0.45];
     case 'plant': return [0.45, 0.45];
