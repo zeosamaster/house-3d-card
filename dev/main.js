@@ -51,6 +51,7 @@ let hass = {
   areas: Object.fromEntries(fixture.areas.map((a) => [a.area_id, a])),
   floors: Object.fromEntries(fixture.floors.map((f) => [f.floor_id, f])),
   user: { is_admin: true, name: 'dev' },
+  config: { latitude: 38.95, longitude: -9.07 },
   locale: { language: new URLSearchParams(location.search).get('lang') || 'en' },
   callService: async (domain, service, data) => {
     const ids = [data.entity_id ?? []].flat();
@@ -72,6 +73,20 @@ let hass = {
     }
   },
   callWS: async (msg) => {
+    if (msg.type === 'history/history_during_period') {
+      // A plausible day: evening lights, a morning door, the TV after dinner.
+      const t0 = Date.parse(msg.start_time) / 1000;
+      const out = {};
+      msg.entity_ids.forEach((id, i) => {
+        const at = (h) => t0 + h * 3600;
+        const rows = [{ s: 'off', lu: t0 }];
+        if (id.startsWith('light.')) rows.push({ s: 'on', lu: at(17.5 + (i % 5) * 0.4) }, { s: 'off', lu: at(22 + (i % 4) * 0.5) }, { s: 'on', lu: at(31) }, { s: 'off', lu: at(32 + (i % 3) * 0.3) });
+        if (id.startsWith('binary_sensor.')) rows.push({ s: 'on', lu: at(8 + i % 6) }, { s: 'off', lu: at(8.4 + i % 6) });
+        if (id.startsWith('media_player.')) rows.push({ s: 'on', lu: at(21) }, { s: 'off', lu: at(23.5) });
+        out[id] = rows;
+      });
+      return out;
+    }
     if (msg.type === 'lovelace/config' && msg.url_path === 'dashboard-areas') return areasDashboard;
     if (msg.type === 'lovelace/config') return structuredClone(dashboard);
     if (msg.type === 'lovelace/config/save') {
@@ -104,7 +119,7 @@ class FakeTile extends HTMLElement {
 customElements.define('fake-tile', FakeTile);
 
 // Stand-in for HA's ha-icon: a glyph per icon family.
-const GLYPH = { heart: '♥', crosshairs: '⌖', dishwasher: '🍽', 'washing-machine': '🧺', check: '✅', thermometer: '🌡', lightbulb: '💡', snowflake: '❄', fire: '🔥', door: '🚪', window: '🪟', weather: '⛅', solar: '☀', battery: '🔋',
+const GLYPH = { history: '⏱', play: '▶', pause: '⏸', heart: '♥', crosshairs: '⌖', dishwasher: '🍽', 'washing-machine': '🧺', check: '✅', thermometer: '🌡', lightbulb: '💡', snowflake: '❄', fire: '🔥', door: '🚪', window: '🪟', weather: '⛅', solar: '☀', battery: '🔋',
   lightning: '⚡', car: '🚗', fan: '🌀', water: '💧' };
 customElements.define('ha-icon', class extends HTMLElement {
   static get observedAttributes() { return ['icon']; }

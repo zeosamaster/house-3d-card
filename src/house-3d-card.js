@@ -4,9 +4,10 @@ import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups, isOn } from './hass-map.js';
 import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp, appliancesStatus } from './status.js';
 import { strings } from './i18n.js';
+import { loadHistory, stateAt, sunPosition, skyGradient } from './replay.js';
 import './editor.js';
 
-const VERSION = '0.14.0';
+const VERSION = '0.15.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -27,6 +28,7 @@ class House3DCard extends LitElement {
     _heat: { state: true },
     _away: { state: true },
     _ambient: { state: true },
+    _replay: { state: true },
   };
 
   constructor() {
@@ -172,6 +174,7 @@ class House3DCard extends LitElement {
 
   _focus(id, { push = true } = {}) {
     this._poke();
+    if (id && this._replay) this._stopReplay();
     const found = id ? this._roomCfg(id) : null;
     if (!found) this._sheetBig = false;
     this._room = found ? { id, level: found.level.id, name: found.room.name, area: found.room.area } : null;
@@ -224,6 +227,80 @@ class House3DCard extends LitElement {
         ${d.weather ? html`<span><ha-icon icon=${d.weather.icon}></ha-icon>${fmt(d.weather.temp, '°')}</span>` : nothing}
         ${home?.length ? html`<span><ha-icon icon="mdi:home-heart"></ha-icon>${home.join(' · ')}</span>` : nothing}
       </div>
+    </div>`;
+  }
+
+  /* ---------- time machine ---------- */
+
+  async _startReplay() {
+    const end = Date.now();
+    const start = end - 24 * 3600 * 1000;
+    const entities = [...new Set([...this._stage.glowEntities(), ...this._stage.liveEntities()])];
+    this._replay = { start, end, t: start, playing: false, loading: true };
+    try {
+      const history = await loadHistory(this.hass, entities, start, end);
+      if (!this._replay) return;
+      this._replay = { ...this._replay, history, loading: false };
+      this._seek(start);
+      this._play(true);
+    } catch (e) {
+      this._replay = null;
+      this._say(e.message);
+    }
+  }
+
+  _seek(t) {
+    const r = this._replay;
+    if (!r?.history) return;
+    r.t = Math.min(r.end, Math.max(r.start, t));
+    const { latitude = 38.7, longitude = -9.1 } = this.hass.config || {};
+    const sun = sunPosition(r.t, latitude, longitude);
+    this._stage.setSun(sun.elevation, sun.azimuth);
+    this._stage.applyGlows((cfg) => ({ on: stateAt(r.history, cfg.entity, r.t) === 'on', brightness: 1, temp: 2900 }));
+    this._stage.applyLive((e) => ({ state: stateAt(r.history, e, r.t) ?? 'off' }));
+    this._replay = { ...r };
+  }
+
+  // 24 hours in ~24 seconds; stops at "now".
+  _play(on) {
+    clearInterval(this._replayTimer);
+    if (!this._replay) return;
+    this._replay = { ...this._replay, playing: on };
+    if (!on) return;
+    if (this._replay.t >= this._replay.end) this._seek(this._replay.start);
+    this._replayTimer = setInterval(() => {
+      const r = this._replay;
+      if (!r) return clearInterval(this._replayTimer);
+      const next = r.t + 60 * 1000 * 1.25; // 75 s of house per 50 ms tick
+      this._seek(next);
+      if (next >= r.end) this._play(false);
+    }, 50);
+  }
+
+  _stopReplay() {
+    clearInterval(this._replayTimer);
+    this._replay = null;
+    this._glowSeen = null;
+    this._liveSeen = null;
+    this._syncHouse(true);
+    this._syncLive(true);
+  }
+
+  _replayBar() {
+    const r = this._replay;
+    const lang = this._config.language || this.hass.locale?.language || 'en';
+    const { latitude = 38.7, longitude = -9.1 } = this.hass.config || {};
+    const when = new Intl.DateTimeFormat(lang, { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(r.t));
+    this._skyTrack ??= skyGradient(r.start, r.end, latitude, longitude);
+    return html`<div class="replay">
+      <button class="rp-btn" @click=${() => this._play(!r.playing)} ?disabled=${r.loading}>
+        <ha-icon icon=${r.playing ? 'mdi:pause' : 'mdi:play'}></ha-icon></button>
+      <div class="rp-track">
+        <input type="range" min=${r.start} max=${r.end} step="60000" .value=${String(r.t)} ?disabled=${r.loading}
+          style="background:${this._skyTrack}" @input=${(e) => { this._play(false); this._seek(Number(e.target.value)); }}>
+      </div>
+      <span class="rp-time">${r.loading ? this._t.loading : when}</span>
+      <button class="rp-live" @click=${() => { this._skyTrack = null; this._stopReplay(); }}>${this._t.live}</button>
     </div>`;
   }
 
@@ -333,7 +410,7 @@ class House3DCard extends LitElement {
 
   // Sun + every lamp's house-view glow, only when something they show changed.
   _syncHouse(force = false) {
-    if (!this._stage || !this.hass) return;
+    if (!this._stage || !this.hass || this._replay) return;
     const sun = this.hass.states[this._config.sun ?? 'sun.sun'];
     if (sun) this._stage.setSun(Number(sun.attributes.elevation ?? -30), Number(sun.attributes.azimuth ?? 180));
     const weather = this.hass.states[this._statusCfg().weather];
@@ -374,7 +451,7 @@ class House3DCard extends LitElement {
 
   // Contact sensors on openings and TVs: only when one of them changed.
   _syncLive(force = false) {
-    if (!this._stage || !this.hass) return;
+    if (!this._stage || !this.hass || this._replay) return;
     const ids = this._liveIds ??= this._stage.liveEntities();
     if (!force && ids.every((e) => this._liveSeen?.get(e) === this.hass.states[e])) return;
     this._liveSeen = new Map(ids.map((e) => [e, this.hass.states[e]]));
@@ -540,9 +617,9 @@ class House3DCard extends LitElement {
         <div class="stage">
           <div class="canvas"></div>
           ${this._ambient && this.hass ? this._clock() : nothing}
-          ${this._room || !this.hass ? nothing : this._spread(this._labels).map((l) => this._roomPill(l))}
-          ${this._room || !this.hass ? nothing : this._carChip()}
-          ${this._room || !this.hass ? nothing : this._dock()}
+          ${this._room || !this.hass || this._replay ? nothing : this._spread(this._labels).map((l) => this._roomPill(l))}
+          ${this._room || !this.hass || this._replay ? nothing : this._carChip()}
+          ${this._room || !this.hass ? nothing : this._replay ? this._replayBar() : this._dock()}
           <div class="bar">
             ${this._room ? html`
               <button class="chip back" @click=${() => this._back()}>← ${plan?.name || 'Casa'}</button>
@@ -552,7 +629,9 @@ class House3DCard extends LitElement {
                 <button class="chip ${this._peel === l.id ? 'on' : ''}" @click=${() => this._setPeel(l.id)}>${l.name}</button>`) : nothing}`}
             <span class="grow"></span>
 
-            ${!this._room && this.hass && this._plan ? this._allOff() : nothing}
+            ${!this._room && this.hass && this._plan && !this._replay ? this._allOff() : nothing}
+            ${!this._room && this.hass && !this._replay ? html`<button class="chip icon" title=${this._t.replay} @click=${() => this._startReplay()}>
+              <ha-icon icon="mdi:history"></ha-icon></button>` : nothing}
             ${this._room ? nothing : html`<button class="chip icon ${this._heat ? 'on' : ''}" title=${this._t.temps}
               @click=${() => this._toggleHeat()}><ha-icon icon="mdi:thermometer"></ha-icon></button>`}
             ${this._room ? nothing : html`<button class="chip icon ${this._showLabels ? 'on' : ''}" title=${this._t.roomNames}
@@ -663,6 +742,16 @@ class House3DCard extends LitElement {
     @keyframes fadein { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
     .wrap .bar, .wrap .pill { transition: opacity 0.8s ease; }
     .wrap.ambient .bar, .wrap.ambient .pill, .wrap.ambient .fab { opacity: 0; pointer-events: none; }
+    .replay { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+      background: rgba(10, 14, 26, 0.78); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; backdrop-filter: blur(8px); color: #eef1f8; }
+    .rp-btn { width: 38px; height: 38px; border-radius: 50%; border: 0; background: #e9eefb; color: #0a0e1a; display: grid; place-items: center; cursor: pointer; flex: none; }
+    .rp-btn ha-icon { --mdc-icon-size: 22px; width: 22px; height: 22px; display: inline-flex; }
+    .rp-track { flex: 1; min-width: 0; }
+    .rp-track input { width: 100%; height: 10px; border-radius: 6px; appearance: none; -webkit-appearance: none; outline: none; margin: 0; }
+    .rp-track input::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid #3b5bdb; box-shadow: 0 2px 6px rgba(0,0,0,0.4); cursor: grab; }
+    .rp-track input::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 3px solid #3b5bdb; cursor: grab; }
+    .rp-time { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 78px; text-align: right; text-transform: capitalize; }
+    .rp-live { font: inherit; font-size: 13px; font-weight: 600; color: #8fb3ff; background: none; border: 1px solid rgba(143,179,255,0.4); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
     .fab { position: absolute; right: 12px; top: 58px; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
       color: #eef1f8; background: rgba(10, 14, 26, 0.72); border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(6px);
       box-shadow: 0 4px 14px rgba(0,0,0,0.35); cursor: pointer; padding: 0; }
