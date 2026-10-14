@@ -6,7 +6,7 @@ import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp, a
 import { strings } from './i18n.js';
 import './editor.js';
 
-const VERSION = '0.12.0';
+const VERSION = '0.13.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -378,7 +378,10 @@ class House3DCard extends LitElement {
     }
     const entity = t.cfg?.entity;
     if (!entity) return;
-    if (t.kind === 'light') this.hass.callService('homeassistant', 'toggle', { entity_id: entity }).catch((e) => this._say(e.message));
+    if (t.kind === 'light') { // room view only: the house view has no lamp tap targets (misclicks)
+      haptic();
+      this.hass.callService('homeassistant', 'toggle', { entity_id: entity }).catch((e) => this._say(e.message));
+    }
     else this._moreInfo(entity);
   }
 

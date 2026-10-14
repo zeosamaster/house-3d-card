@@ -5,6 +5,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { buildHouse } from './three/house.js';
 import { buildFurniture } from './three/furniture.js';
 import { LightUnit } from './three/lights.js';
@@ -74,6 +76,12 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   plinth.receiveShadow = true;
   scene.add(plinth);
 
+  // Image-based lighting: soft reflections and fill on every material; scaled with daylight.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+  const envFor = (d) => 0.08 + 0.2 * d;
+
   // Light comes from the real sun (sun.sun) by day and a soft moon at night; see sky.js.
   const sky = createSky(scene, center, span);
   sky.setNorth(plan.north);
@@ -84,6 +92,15 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   const target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
+  // Ambient occlusion — soft contact shadows where walls meet floors and under furniture.
+  // Rendered only on the settled frame (never while the camera moves), so it costs nothing
+  // while dragging on a phone.
+  const ao = new GTAOPass(scene, camera, 4, 4);
+  ao.blendIntensity = 0.9;
+  ao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.0, thickness: 3, scale: 1.8, samples: 16 });
+  ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+  ao.enabled = false;
+  composer.addPass(ao);
   composer.addPass(new UnrealBloomPass(new THREE.Vector2(4, 4), 0.34, 0.5, 1.0));
   composer.addPass(new OutputPass());
 
@@ -105,6 +122,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     const visible = new Set(topVisible());
     for (const l of levels) l.group.visible = visible.has(l);
     sky.update({ dim: Boolean(room) });
+    scene.environmentIntensity = envFor(sky.daylight) * (room ? 0.8 : 1);
     glows.hide(new Set(units.filter((u) => u.kind === 'light').map((u) => u.id)));
     shadowFrames = 3;
   }
@@ -259,11 +277,14 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     const r = canvas.getBoundingClientRect();
     ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
-    const targets = [...units.map((u) => u.hit), ...topVisible().flatMap((l) => l.floors)];
+    const vis = topVisible();
+    const targets = [...units.map((u) => u.hit), ...vis.flatMap((l) => l.floors)];
     const hits = raycaster.intersectObjects(targets, false);
     if (!hits.length) return null;
-    const device = hits.find((h) => h.object.userData.kind !== 'room');
-    const hit = (device || hits[0]).object.userData;
+    // Devices win over the floor they stand on — but not one hidden under a floor in front of it.
+    const floor = hits.find((h) => h.object.userData.kind === 'room');
+    const device = hits.find((h) => h.object.userData.kind !== 'room' && (!floor || h.distance <= floor.distance + 0.6));
+    const hit = (device || floor || hits[0]).object.userData;
     if (hit.kind !== 'room') return { ...hit, cfg: units.find((u) => u.id === hit.id)?.cfg };
     return hit;
   }
@@ -364,6 +385,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   let awake = 0;
   let running = false;
   let shadowFrames = 3;
+  let settled = false;
 
   function wake(frames = 2) {
     awake = Math.max(awake, frames);
@@ -381,6 +403,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     last = now;
     if (orbit) rig.goal.az += dt * ORBIT_DEG_PER_S;
     const moving = updateRig(dt) || orbit;
+    // AO on the frame after things settle (and only then).
+    if (moving) { ao.enabled = false; settled = false; } else if (!settled) { settled = true; ao.enabled = true; awake = Math.max(awake, 1); }
     let active = moving;
     for (const u of units) active = u.update(dt) || active;
     if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; active = true; }
@@ -404,6 +428,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     composer.setSize(width, height);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    sky.setAspect(camera.aspect);
     frameGoal();
     wake(3);
   }
@@ -465,6 +490,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     /** HA's sun.sun elevation/azimuth (degrees). */
     setSun(elevation, azimuth) {
       if (!sky.update({ elevation, azimuth, dim: Boolean(room) })) return;
+      scene.environmentIntensity = envFor(sky.daylight) * (room ? 0.8 : 1);
       glows.setDaylight(sky.daylight);
       if (lastLive) this.applyLive(lastLive);
       shadowFrames = 3;

@@ -39,15 +39,45 @@ export function createSky(scene, center, span) {
   sc.far = span * 4;
   sun.shadow.bias = -0.0008;
   sun.shadow.normalBias = 0.04;
+  sun.shadow.radius = 3; // softer edges
+  sun.shadow.blurSamples = 12;
   sun.target.position.copy(center);
   scene.add(hemi, sun, sun.target);
 
   const canvas = document.createElement('canvas');
   canvas.width = 2;
   canvas.height = 256;
+  // Stars are painted into the sky texture, which matches the screen's aspect (setAspect) so
+  // they stay round. (The camera looks down at the house and never sees a 3D sky dome.)
+  const STARS = Array.from({ length: 380 }, (_, i) => {
+    const r = (n) => { const x = Math.sin(i * 12.9898 + n * 78.233) * 43758.5453; return x - Math.floor(x); };
+    return [r(1), r(2) * r(2), 0.6 + r(3) * 0.9, 0.35 + r(4) * 0.65]; // u, v (denser up top), size, alpha
+  });
+  let paint = null;
   const bg = new THREE.CanvasTexture(canvas);
   bg.colorSpace = THREE.SRGBColorSpace;
   scene.background = bg;
+
+  function drawSky() {
+    if (!paint) return;
+    const g = canvas.getContext('2d');
+    const { width: W, height: Hh } = canvas;
+    const grad = g.createLinearGradient(0, 0, 0, Hh);
+    grad.addColorStop(0, `#${paint.top.getHexString()}`);
+    grad.addColorStop(1, `#${paint.horizon.getHexString()}`);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, W, Hh);
+    if (paint.stars > 0.02) {
+      // all across the width; fewer of them on narrow screens
+      for (const [u, v, size, a] of STARS.slice(0, Math.ceil(STARS.length * Math.min(1, W / 700)))) {
+        g.fillStyle = `rgba(230, 236, 255, ${(a * paint.stars * (1 - v * 0.8)).toFixed(3)})`;
+        g.beginPath();
+        g.arc(u * W, v * Hh * 0.8, size * 0.5, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    bg.needsUpdate = true;
+  }
 
   let north = new THREE.Vector2(0, -1);
   let last = null;
@@ -58,6 +88,16 @@ export function createSky(scene, center, span) {
     daylight: 0,
 
     setNorth([x, z]) { north = new THREE.Vector2(x, z).normalize(); last = null; },
+
+    /** Viewport width / height: the sky texture takes the same shape so stars stay round. */
+    setAspect(aspect) {
+      const w = Math.round(Math.min(1024, Math.max(96, 384 * aspect)));
+      if (w === canvas.width) return;
+      canvas.width = w;
+      canvas.height = 384;
+      bg.dispose(); // re-upload at the new size
+      drawSky();
+    },
 
     /** Returns true when anything visible changed (the caller re-renders + redraws shadows). */
     cloud: 0,
@@ -98,13 +138,8 @@ export function createSky(scene, center, span) {
       hemi.color.copy(s.horizon).lerp(new THREE.Color('#ffffff'), 0.35);
       hemi.groundColor.set(night ? '#0b0e17' : '#3a372e');
 
-      const g = canvas.getContext('2d');
-      const grad = g.createLinearGradient(0, 0, 0, 256);
-      grad.addColorStop(0, `#${s.top.getHexString()}`);
-      grad.addColorStop(1, `#${s.horizon.getHexString()}`);
-      g.fillStyle = grad;
-      g.fillRect(0, 0, 2, 256);
-      bg.needsUpdate = true;
+      paint = { top: s.top.clone(), horizon: s.horizon.clone(), stars: (1 - smooth(-12, -4, elevation)) * (1 - cloud * 0.9) };
+      drawSky();
       return true;
     },
   };
