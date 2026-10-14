@@ -134,3 +134,21 @@ export const fmt = (v, unit) => {
   const n = Math.abs(v) >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
   return `${n}${unit}`;
 };
+
+const IDLE = ['power_off', 'off', 'initial', 'sleep', 'standby', 'unavailable', 'unknown', 'cancel', 'idle'];
+const DONE = ['end', 'finished', 'complete', 'completed', 'done'];
+
+/** Washing machine, dishwasher…: `list` is the card's `status.appliances` ([{ name, icon,
+ *  status: enum sensor, ends: timestamp sensor }]). Idle ones are left out. */
+export function appliancesStatus(hass, list = []) {
+  return (list || []).map((a) => {
+    const st = hass.states[a.status];
+    if (!st) return null;
+    const s = String(st.state).toLowerCase();
+    if (IDLE.includes(s)) return null;
+    const phase = DONE.includes(s) ? 'done' : s.includes('error') || s === 'power_fail' ? 'error' : 'running';
+    const end = Date.parse(hass.states[a.ends]?.state);
+    const minutes = Number.isFinite(end) ? Math.max(0, Math.round((end - Date.now()) / 60000)) : null;
+    return { name: a.name || st.attributes.friendly_name, icon: a.icon || 'mdi:washing-machine', phase, minutes, entity: a.status };
+  }).filter(Boolean);
+}

@@ -50,7 +50,8 @@ The room sheet follows the hide/order curation of your Areas dashboard (`areas_d
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `plan` | starter layout from your areas | The house — written by the editor |
-| `status` | weather/people auto | Dock entities: `weather`, `people` (list), `solar`, `battery`, `load` |
+| `status` | weather/people auto | Dock entities: `weather`, `people` (list), `solar`, `battery`, `load`, `appliances` (list of `{ name, icon, status, ends }` — an enum status sensor and a finish-time timestamp sensor; shows a live countdown while running, a green "done" chip at the end) |
+| `language` | the viewer's HA language | `en` or `pt` for the card's own words |
 | `car` | — | Chip over the plan's `car`: `battery` (%), `charging` (sensor or binary_sensor) |
 | `sun` | `sun.sun` | Drives the light and sky (cloud cover from the `status.weather` entity greys it) |
 | `idle_orbit` | `180` | Seconds without a touch before the house view slowly orbits (wall tablets); `false` turns it off |

@@ -25,6 +25,9 @@ add('sensor.dev_battery', '76', { unit_of_measurement: '%', device_class: 'batte
 add('sensor.dev_load', '1.3', { unit_of_measurement: 'kW', device_class: 'power' });
 add('sensor.dev_car_battery', '54', { unit_of_measurement: '%' });
 add('sensor.dev_car_charging', 'charging');
+add('sensor.dev_dish_status', 'rinsing');
+add('sensor.dev_dish_ends', new Date(Date.now() + 42 * 60000).toISOString(), { device_class: 'timestamp' });
+add('sensor.dev_wash_status', 'end');
 const ac = Object.keys(states).find((e) => e.startsWith('climate.ac_sala'));
 if (ac) states[ac] = { ...states[ac], state: 'cool', attributes: { ...states[ac].attributes, temperature: 23, current_temperature: 25.5 } };
 // Open a door and a window (if they exist in the fixture) and switch a TV on.
@@ -48,6 +51,7 @@ let hass = {
   areas: Object.fromEntries(fixture.areas.map((a) => [a.area_id, a])),
   floors: Object.fromEntries(fixture.floors.map((f) => [f.floor_id, f])),
   user: { is_admin: true, name: 'dev' },
+  locale: { language: new URLSearchParams(location.search).get('lang') || 'en' },
   callService: async (domain, service, data) => {
     const ids = [data.entity_id ?? []].flat();
     log(`${domain}.${service} ${ids.join(', ')}`);
@@ -100,7 +104,7 @@ class FakeTile extends HTMLElement {
 customElements.define('fake-tile', FakeTile);
 
 // Stand-in for HA's ha-icon: a glyph per icon family.
-const GLYPH = { lightbulb: '💡', snowflake: '❄', fire: '🔥', door: '🚪', window: '🪟', weather: '⛅', solar: '☀', battery: '🔋',
+const GLYPH = { dishwasher: '🍽', 'washing-machine': '🧺', check: '✅', thermometer: '🌡', lightbulb: '💡', snowflake: '❄', fire: '🔥', door: '🚪', window: '🪟', weather: '⛅', solar: '☀', battery: '🔋',
   lightning: '⚡', car: '🚗', fan: '🌀', water: '💧' };
 customElements.define('ha-icon', class extends HTMLElement {
   static get observedAttributes() { return ['icon']; }
@@ -120,7 +124,9 @@ const saved = new URLSearchParams(location.search).get('plan') === 'saved' && lo
 const devPlan = Object.values(import.meta.glob('./plan.json', { eager: true, import: 'default' }))[0];
 let dashboard = saved ? JSON.parse(saved)
   : { views: [{ type: 'panel', cards: [{ type: 'custom:house-3d-card', dashboard: 'house-3d', ...(devPlan ? { plan: devPlan } : {}),
-    status: { weather: 'weather.dev', people: ['person.dev_a', 'person.dev_b'], solar: 'sensor.dev_solar', battery: 'sensor.dev_battery', load: 'sensor.dev_load' },
+    status: { weather: 'weather.dev', people: ['person.dev_a', 'person.dev_b'], solar: 'sensor.dev_solar', battery: 'sensor.dev_battery', load: 'sensor.dev_load',
+      appliances: [{ name: 'Loiça', icon: 'mdi:dishwasher', status: 'sensor.dev_dish_status', ends: 'sensor.dev_dish_ends' },
+        { name: 'Roupa', icon: 'mdi:washing-machine', status: 'sensor.dev_wash_status' }] },
     car: { battery: 'sensor.dev_car_battery', charging: 'sensor.dev_car_charging' } }] }] };
 
 const card = document.createElement('house-3d-card');

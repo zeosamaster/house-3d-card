@@ -2,10 +2,11 @@ import { LitElement, html, css, nothing } from 'lit';
 import { normalizePlan, planFromAreas, roomGroup } from './plan.js';
 import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups, isOn } from './hass-map.js';
-import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp } from './status.js';
+import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp, appliancesStatus } from './status.js';
+import { strings } from './i18n.js';
 import './editor.js';
 
-const VERSION = '0.9.0';
+const VERSION = '0.10.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -45,6 +46,8 @@ class House3DCard extends LitElement {
   }
 
   getCardSize() { return 12; }
+
+  get _t() { return strings(this.hass, this._config?.language); }
   static getStubConfig() { return {}; }
 
   // Idle showcase: after `idle_orbit` seconds without a touch (default 180, false = off) the
@@ -196,7 +199,7 @@ class House3DCard extends LitElement {
       <button class="pill ${st.open.length ? 'alert' : ''}" style="left:${l.x}px;top:${l.y}px" @click=${() => this._focus(l.id)}>
         ${this._showLabels ? html`<span class="name">${l.name}</span>` : nothing}
         ${showTemp ? html`<span class=${this._heat ? 'temp' : 'dim'} style=${this._heat ? `color: rgb(${heatColor(st.temp).join(',')})` : ''}>${fmt(st.temp, '°')}</span>` : nothing}
-        ${st.lightsOn ? html`<span class="tag lit tap" title="Turn this room's lights off"
+        ${st.lightsOn ? html`<span class="tag lit tap" title=${this._t.roomOff}
           @click=${(e) => { e.stopPropagation(); this._switchLights(this._lampEntities(level, l.id), l.name); }}><ha-icon icon="mdi:lightbulb-on"></ha-icon>${st.lightsOn > 1 ? st.lightsOn : ''}</span>` : nothing}
         ${ac ? html`<span class="tag ${ac.mode === 'heat' ? 'heat' : 'cool'}"><ha-icon icon=${ac.mode === 'heat' ? 'mdi:fire' : ac.mode === 'dry' ? 'mdi:water-percent' : ac.mode === 'fan_only' ? 'mdi:fan' : 'mdi:snowflake'}></ha-icon>${ac.target != null ? fmt(ac.target, '°') : ''}</span>` : nothing}
         ${st.open.length ? html`<span class="tag open"><ha-icon icon=${st.open.some((o) => o.kind === 'door') ? 'mdi:door-open' : 'mdi:window-open-variant'}></ha-icon>${st.open.length > 1 ? st.open.length : ''}</span>` : nothing}
@@ -205,16 +208,23 @@ class House3DCard extends LitElement {
 
   _dock() {
     const d = dockStatus(this.hass, this._config.status);
+    // Countdowns move on their own: re-render every 30 s while an appliance is running.
+    const running = appliancesStatus(this.hass, this._config.status?.appliances).some((a) => a.phase === 'running');
+    if (running && !this._tick) this._tick = setInterval(() => this.requestUpdate(), 30000);
+    if (!running && this._tick) { clearInterval(this._tick); this._tick = null; }
     const info = (entity) => () => this._moreInfo(entity);
     return html`
       <div class="dock">
         ${d.weather ? html`<button class="dk" @click=${info(d.weather.entity)}><ha-icon icon=${d.weather.icon}></ha-icon>${fmt(d.weather.temp, '°')}</button>` : nothing}
         ${d.people.length ? html`<span class="dk people">${d.people.map((p) => html`
-          <button class="avatar ${p.home ? 'home' : 'away'}" title=${`${p.name} · ${p.home ? 'em casa' : 'fora'}`} @click=${info(p.entity)}
+          <button class="avatar ${p.home ? 'home' : 'away'}" title=${`${p.name} · ${p.home ? this._t.home : this._t.away}`} @click=${info(p.entity)}
             style=${p.picture ? `background-image:url(${p.picture})` : ''}>${p.picture ? '' : p.name.trim()[0]}</button>`)}</span>` : nothing}
         ${d.solar ? html`<button class="dk ${d.solar.value > 0.05 ? 'sun' : ''}" @click=${info(d.solar.entity)}><ha-icon icon="mdi:solar-power-variant"></ha-icon>${fmt(d.solar.value, ` ${d.solar.unit}`)}</button>` : nothing}
         ${d.battery ? html`<button class="dk" @click=${info(d.battery.entity)}><ha-icon icon=${d.battery.value > 80 ? 'mdi:battery-high' : d.battery.value > 30 ? 'mdi:battery-medium' : 'mdi:battery-low'}></ha-icon>${fmt(d.battery.value, '%')}</button>` : nothing}
         ${d.load ? html`<button class="dk" @click=${info(d.load.entity)}><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon>${fmt(d.load.value, ` ${d.load.unit}`)}</button>` : nothing}
+        ${appliancesStatus(this.hass, this._config.status?.appliances).map((a) => html`
+          <button class="dk appliance ${a.phase}" @click=${info(a.entity)}><ha-icon icon=${a.phase === 'done' ? 'mdi:check-circle' : a.icon}></ha-icon>
+            ${a.name}${a.phase === 'running' && a.minutes != null ? ` · ${a.minutes} ${this._t.min}` : a.phase === 'done' ? ` · ${this._t.done}` : a.phase === 'error' ? ` · ${this._t.error}` : ''}</button>`)}
       </div>`;
   }
 
@@ -225,7 +235,7 @@ class House3DCard extends LitElement {
     const lit = this._litOf(lamps).length;
     return html`<button class="roomlights ${lit ? 'on' : ''}" @click=${() => this._switchLights(lamps, this._room.name)}>
       <ha-icon icon=${lit ? 'mdi:lightbulb-group' : 'mdi:lightbulb-group-outline'}></ha-icon>
-      <span>${lit ? `${lit} of ${lamps.length} on` : 'All off'}</span><span class="grow"></span><span class="sw">${lit ? 'Turn off' : 'Turn on'}</span>
+      <span>${lit ? this._t.lightsOn(lit, lamps.length) : this._t.allOff}</span><span class="grow"></span><span class="sw">${lit ? this._t.turnOff : this._t.turnOn}</span>
     </button>`;
   }
 
@@ -233,7 +243,7 @@ class House3DCard extends LitElement {
     const all = this._lampEntities();
     const lit = this._litOf(all).length;
     if (!lit) return nothing;
-    return html`<button class="chip lit" title="Turn off every light" @click=${() => this._switchLights(all, 'House')}>
+    return html`<button class="chip lit" title=${this._t.everyOff} @click=${() => this._switchLights(all, this._t.house)}>
       <ha-icon icon="mdi:lightbulb-group-off-outline"></ha-icon>${lit}</button>`;
   }
 
@@ -359,7 +369,7 @@ class House3DCard extends LitElement {
       undo = () => { haptic(); this.hass.callService('scene', 'turn_on', { entity_id: 'scene.house_3d_undo' }); this._toast = null; };
     } catch { /* no undo for users who can't create scenes */ }
     await this.hass.callService('homeassistant', 'turn_off', { entity_id: lit }).catch((e) => this._say(e.message));
-    this._say(`${label}: ${lit.length} ${lit.length === 1 ? 'light' : 'lights'} off`, undo && { label: 'Undo', run: undo }, 8000);
+    this._say(`${label}: ${this._t.lightsOff(lit.length)}`, undo && { label: this._t.undo, run: undo }, 8000);
   }
 
   /* ---------- room sheet: HA's own tile cards ---------- */
@@ -375,8 +385,8 @@ class House3DCard extends LitElement {
   async _loadSheet() {
     const room = this._room;
     if (!room) { this._sheet = null; return; }
-    if (!room.area) { this._sheet = { room, groups: [], note: 'This room is not linked to an HA area.' }; return; }
-    if (!this.hass.areas?.[room.area]) { this._sheet = { room, groups: [], note: 'Area not found.' }; return; }
+    if (!room.area) { this._sheet = { room, groups: [], note: this._t.noArea }; return; }
+    if (!this.hass.areas?.[room.area]) { this._sheet = { room, groups: [], note: this._t.areaGone }; return; }
     const [helpers, curation] = await Promise.all([window.loadCardHelpers?.(), this._curation()]);
     if (this._room !== room) return;
     const groups = areaGroups(this.hass, room.area, curation).map((g) => ({
@@ -419,7 +429,7 @@ class House3DCard extends LitElement {
     await this.hass.callWS({ type: 'lovelace/config/save', url_path: urlPath === 'lovelace' ? null : urlPath, config: lovelace });
     this.setConfig({ ...this._config, plan: card.plan }); // HA reloads too; don't wait for it
     this._editing = false;
-    this._say('Plan saved');
+    this._say(this._t.saved);
   }
 
   /* ---------- lifecycle ---------- */
@@ -458,14 +468,14 @@ class House3DCard extends LitElement {
                 <button class="chip ${this._peel === l.id ? 'on' : ''}" @click=${() => this._setPeel(l.id)}>${l.name}</button>`) : nothing}`}
             <span class="grow"></span>
             ${!this._room && this.hass && this._plan ? this._allOff() : nothing}
-            ${this._room ? nothing : html`<button class="chip icon ${this._heat ? 'on' : ''}" title="Temperatures"
+            ${this._room ? nothing : html`<button class="chip icon ${this._heat ? 'on' : ''}" title=${this._t.temps}
               @click=${() => this._toggleHeat()}><ha-icon icon="mdi:thermometer"></ha-icon></button>`}
-            ${this._room ? nothing : html`<button class="chip icon ${this._showLabels ? 'on' : ''}" title="Room names"
+            ${this._room ? nothing : html`<button class="chip icon ${this._showLabels ? 'on' : ''}" title=${this._t.roomNames}
               @click=${() => this._toggleLabels()}>Aa</button>`}
-            ${admin ? html`<button class="chip icon" title="Edit house" @click=${() => this._openEditor()}>✎</button>` : nothing}
+            ${admin ? html`<button class="chip icon" title=${this._t.editHouse} @click=${() => this._openEditor()}>✎</button>` : nothing}
           </div>
           ${this._error ? html`<div class="error"><b>Can't show the house</b><p>${this._error}</p></div>` : nothing}
-          ${!this._config.plan && plan && !this._room ? html`<div class="hint">Starter layout from your HA areas — tap ✎ to arrange the rooms.</div>` : nothing}
+          ${!this._config.plan && plan && !this._room ? html`<div class="hint">${this._t.starter}</div>` : nothing}
           ${this._toast ? html`<div class="toast">${this._toast.text}${this._toast.action ? html`
             <button class="act" @click=${() => this._toast.action.run()}>${this._toast.action.label}</button>` : nothing}</div>` : nothing}
         </div>
@@ -478,8 +488,8 @@ class House3DCard extends LitElement {
             </header>
             ${this._roomLightsButton()}
             ${sheet?.note ? html`<p class="note">${sheet.note}</p>` : nothing}
-            ${!sheet ? html`<p class="note">Loading…</p>` : nothing}
-            ${sheet?.groups.map((g) => html`<h3>${g.title}</h3><div class="tiles">${g.cards}</div>`)}
+            ${!sheet ? html`<p class="note">${this._t.loading}</p>` : nothing}
+            ${sheet?.groups.map((g) => html`<h3>${this._t[g.key] || g.title}</h3><div class="tiles">${g.cards}</div>`)}
           </aside>` : nothing}
       </div>
       ${this._editing ? html`
@@ -541,6 +551,9 @@ class House3DCard extends LitElement {
       background: rgba(10, 14, 26, 0.62); border: 1px solid rgba(255,255,255,0.10); border-radius: 999px; padding: 4px 10px;
       backdrop-filter: blur(6px); cursor: pointer; }
     .dk.sun { color: #ffd27a; }
+    .dk.appliance.running { color: #9fd0ff; }
+    .dk.appliance.done { color: #8ef0a8; border-color: rgba(142, 240, 168, 0.5); }
+    .dk.appliance.error { color: #ff8a8a; border-color: rgba(255, 99, 99, 0.6); }
     .dk.people { gap: 4px; padding: 3px 5px; cursor: default; }
     .avatar { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; font: inherit; font-size: 11px; font-weight: 700;
       color: #0a0e1a; background: #cfd6e6 center/cover; padding: 0; cursor: pointer; }
