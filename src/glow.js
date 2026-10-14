@@ -3,6 +3,7 @@
 // No real three.js lights — 47 of those would sink a phone.
 import * as THREE from 'three';
 import { lightColor } from './three/lights.js';
+import { roomGroup } from './plan.js';
 
 let poolTexture;
 function pool() {
@@ -59,6 +60,34 @@ export function createGlows(levels, H) {
   const tmp = new THREE.Color();
   let daylight = 0;
 
+  // Windows: for each room's glass, the lamps of its whole area (L-shaped rooms share).
+  const panes = [];
+  for (const level of levels) {
+    for (const [roomId, material] of level.windows || []) {
+      const ids = new Set(roomGroup(level.cfg, roomId).map((r) => r.id));
+      panes.push({ material, lamps: all.filter((g) => ids.has(g.cfg.room)), base: material.emissive.clone(), baseI: material.emissiveIntensity, baseO: material.opacity });
+    }
+  }
+  const warm = new THREE.Color('#ffb46a');
+  function paintWindows() {
+    for (const p of panes) {
+      const on = p.lamps.filter((g) => g.state?.on);
+      const level = on.length ? Math.max(...on.map((g) => g.state.brightness ?? 1)) : 0;
+      const night = 1 - daylight;
+      if (!level || night < 0.05) {
+        p.material.emissive.copy(p.base);
+        p.material.emissiveIntensity = p.baseI;
+        p.material.opacity = p.baseO;
+        continue;
+      }
+      // Warm, bright enough to bloom: a lit room seen from the garden at night.
+      lightColor({ temp: 2900, ...on[0].state }, tmp).lerp(warm, 0.4);
+      p.material.emissive.copy(tmp);
+      p.material.emissiveIntensity = (0.9 + 1.6 * level) * night + p.baseI * (1 - night);
+      p.material.opacity = p.baseO + (0.55 - p.baseO) * night;
+    }
+  }
+
   function paint(g) {
     const s = g.state;
     const on = Boolean(s?.on) && !g.hidden;
@@ -76,6 +105,7 @@ export function createGlows(levels, H) {
     /** state(cfg) → { on, brightness, temp, color } */
     apply(state) {
       for (const g of all) { g.state = state(g.cfg); paint(g); }
+      paintWindows();
     },
     /** Lamps shown by real lights instead (the focused room's). */
     hide(ids) {
@@ -84,6 +114,7 @@ export function createGlows(levels, H) {
     setDaylight(d) {
       daylight = d;
       for (const g of all) paint(g);
+      paintWindows();
     },
     entities() { return all.map((g) => g.cfg.entity).filter(Boolean); },
   };

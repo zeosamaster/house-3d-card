@@ -5,7 +5,7 @@ import { lampState, lampCaps, acState, areaGroups, isOn } from './hass-map.js';
 import { roomStatus, dockStatus, carStatus, fmt } from './status.js';
 import './editor.js';
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -21,6 +21,7 @@ class House3DCard extends LitElement {
     _toast: { state: true },
     _showLabels: { state: true },
     _carAt: { state: true },
+    _sheetBig: { state: true },
   };
 
   constructor() {
@@ -87,7 +88,9 @@ class House3DCard extends LitElement {
         onLongPress: (t) => this._moreInfo(t.cfg?.entity),
         onMove: () => this._updateLabels(),
         capsOf: (cfg) => lampCaps(this.hass?.states[cfg.entity]),
+        intro: !this._introDone && !new URLSearchParams(location.hash.slice(1)).get('room'),
       });
+      this._introDone = true;
     } catch (e) {
       this._error = `3D is not available on this device (${e.message}).`;
       return;
@@ -120,6 +123,7 @@ class House3DCard extends LitElement {
 
   _focus(id, { push = true } = {}) {
     const found = id ? this._roomCfg(id) : null;
+    if (!found) this._sheetBig = false;
     this._room = found ? { id, level: found.level.id, name: found.room.name, area: found.room.area } : null;
     this._stage.focusRoom(this._room);
     this._watched = new Map();
@@ -374,7 +378,7 @@ class House3DCard extends LitElement {
             ${this._room ? html`
               <button class="chip back" @click=${() => this._back()}>← ${plan?.name || 'Casa'}</button>
               <span class="title">${this._room.name}</span>` : html`
-              <span class="title">${plan?.name || 'Casa'}</span>
+              <span class="title home">${plan?.name || 'Casa'}</span>
               ${levels.length > 1 ? levels.map((l) => html`
                 <button class="chip ${this._peel === l.id ? 'on' : ''}" @click=${() => this._setPeel(l.id)}>${l.name}</button>`) : nothing}`}
             <span class="grow"></span>
@@ -389,7 +393,8 @@ class House3DCard extends LitElement {
             <button class="act" @click=${() => this._toast.action.run()}>${this._toast.action.label}</button>` : nothing}</div>` : nothing}
         </div>
         ${this._room ? html`
-          <aside class="sheet">
+          <aside class="sheet ${this._sheetBig ? 'big' : ''}">
+            <button class="grip" aria-label="Expand" @click=${() => { this._sheetBig = !this._sheetBig; }}></button>
             <header>
               <h2>${this._room.name}</h2>
               ${temp || hum ? html`<span class="climate">${[temp, hum].filter(Boolean).join(' · ')}</span>` : nothing}
@@ -487,13 +492,22 @@ class House3DCard extends LitElement {
     .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .note { color: var(--secondary-text-color); }
     @media (max-width: 500px) {
+      .title.home { display: none; }
+      .bar { gap: 5px; padding: 8px; }
+      .chip { padding: 5px 10px; }
       .dk { font-size: 12px; padding: 3px 8px; }
       .dock { gap: 4px; left: 8px; bottom: 8px; }
     }
+    .grip { display: none; }
     @media (max-width: 800px), (orientation: portrait) and (max-width: 1100px) {
       .wrap.has-sheet { flex-direction: column; }
-      .wrap.has-sheet .stage { flex: 0 0 52%; }
-      .sheet { width: auto; flex: 1; }
+      .wrap.has-sheet .stage { flex: 0 0 50%; transition: flex-basis 0.3s ease; }
+      .wrap.has-sheet:has(.sheet.big) .stage { flex-basis: 22%; }
+      .sheet { width: auto; flex: 1; border-radius: 18px 18px 0 0; margin-top: -16px; position: relative; z-index: 1;
+        box-shadow: 0 -8px 24px rgba(0,0,0,0.35); padding-top: 4px; }
+      .grip { display: block; width: 100%; height: 22px; background: none; border: 0; cursor: pointer; position: relative; }
+      .grip::after { content: ''; position: absolute; left: 50%; top: 9px; width: 40px; height: 5px; border-radius: 3px;
+        transform: translateX(-50%); background: var(--divider-color, rgba(255,255,255,0.25)); }
     }
   `;
 }

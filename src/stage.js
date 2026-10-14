@@ -23,7 +23,7 @@ const ZOOM_MAX = 1.4;
 const LONG_PRESS_MS = 500;
 const WALL_SIDE = { north: -14, west: 14, south: 0, east: 0 };
 
-export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf }) {
+export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf, intro = false }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
@@ -49,7 +49,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
     const house = buildHouse(cfg, { plinth: false });
     group.add(house.group, buildFurniture(cfg.furniture));
     scene.add(group);
-    return { cfg, group, floors: house.floors, cutaways: house.cutaways, index: i };
+    return { cfg, group, floors: house.floors, cutaways: house.cutaways, windows: house.windows, index: i };
   });
   const levelOf = (id) => levels.find((l) => l.cfg.id === id);
   const roomOf = (levelId, roomId) => levelOf(levelId)?.cfg.rooms.find((r) => r.id === roomId);
@@ -146,7 +146,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
       const top = Math.max(...vis.map((l) => l.cfg.elevation)) + H * 0.8;
       const indoor = levels.flatMap((l) => l.cfg.rooms).filter((r) => !r.outdoor);
       const b = indoor.length ? boundsOf(indoor) : plan.bounds;
-      const m = 2.5;
+      const m = camera.aspect < 0.8 ? 0.6 : 2.5; // portrait phones: let the garden crop, keep the house big
       box = new THREE.Box3(new THREE.Vector3(b.minX - m, 0, b.minZ - m), new THREE.Vector3(b.maxX + m, top, b.maxZ + m));
     }
     const { dist, center: c } = fitDistance(box, rig.goal.az, rig.goal.el, fill);
@@ -349,6 +349,13 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf 
   applyVisibility();
   resize();
   updateRig(0, true);
+  if (intro) {
+    // First load: start high and swung round, then ease down into the view.
+    rig.az = rig.goal.az - 50;
+    rig.el = Math.min(EL_MAX, rig.goal.el + 22);
+    rig.dist = rig.goal.dist * 1.7;
+    updateRig(0, true);
+  }
 
   return {
     get room() { return room; },
