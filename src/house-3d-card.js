@@ -2,12 +2,12 @@ import { LitElement, html, css, nothing } from 'lit';
 import { normalizePlan, planFromAreas, roomGroup } from './plan.js';
 import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups, isOn } from './hass-map.js';
-import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp, appliancesStatus } from './status.js';
+import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, rainOf, windOf, roomTemp, appliancesStatus } from './status.js';
 import { strings } from './i18n.js';
 import { loadHistory, stateAt, sunPosition, skyGradient } from './replay.js';
 import './editor.js';
 
-const VERSION = '0.16.0';
+const VERSION = '0.17.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -414,7 +414,7 @@ class House3DCard extends LitElement {
     const sun = this.hass.states[this._config.sun ?? 'sun.sun'];
     if (sun) this._stage.setSun(Number(sun.attributes.elevation ?? -30), Number(sun.attributes.azimuth ?? 180));
     const weather = this.hass.states[this._statusCfg().weather];
-    if (weather) this._stage.setWeather(cloudOf(weather.state));
+    if (weather) this._stage.setWeather(cloudOf(weather.state), { rain: rainOf(weather.state), wind: windOf(weather) });
     this._syncHeat();
     const ids = this._glowIds ??= this._stage.glowEntities();
     if (!force && ids.every((e) => this._glowSeen?.get(e) === this.hass.states[e])) return;

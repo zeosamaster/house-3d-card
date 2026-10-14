@@ -212,7 +212,9 @@ const TREES = {
 export function tree(item) {
   const { height = 4.5, kind = 'round' } = item;
   const k = TREES[kind] ? kind : 'round';
-  return TREES[k](height, (SPREAD[k] * height) / 2, rng(seedOf(item)));
+  const crownAndTrunk = TREES[k](height, (SPREAD[k] * height) / 2, rng(seedOf(item)));
+  crownAndTrunk.userData.sway = true; // rocks about its foot in the wind (life.js)
+  return group(crownAndTrunk);
 }
 
 export function treeFootprint({ height = 4.5, kind }) {
