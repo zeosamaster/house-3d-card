@@ -146,7 +146,7 @@ const builders = {
       ...legs(width, 0.4, 0.1, mat(BLACK), 0.08, 0.015),
       ...doorLines(width, 0.3, 0.13, 0.2, 3, mat(BLACK)),
       at(box(sw + 0.03, sh + 0.03, 0.035, mat(BLACK, { rough: 0.4 }), { r: 0.008 }), 0, 0.72, -0.15),
-      at(box(sw - 0.02, sh - 0.02, 0.01, screen, { r: 0 }), 0, 0.745, -0.129),
+      Object.assign(at(box(sw - 0.02, sh - 0.02, 0.01, screen, { r: 0 }), 0, 0.745, -0.129), { userData: { screen: true } }),
       at(box(0.5, 0.07, 0.09, mat('#2a2c33', { rough: 0.7 }), { r: 0.02 }), 0, 0.46, 0.05),
     );
   },
@@ -407,6 +407,7 @@ export function buildFurniture(items) {
       continue;
     }
     const g = make(item);
+    g.userData.item = item; // the stage finds TVs linked to a media_player here
     if (item.scale) g.scale.setScalar(item.scale);
     g.position.set(item.pos[0], item.y || 0, item.pos[1]);
     g.rotation.y = THREE.MathUtils.degToRad(item.rot || 0);

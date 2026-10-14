@@ -47,9 +47,16 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     const group = new THREE.Group();
     group.position.y = cfg.elevation;
     const house = buildHouse(cfg, { plinth: false });
-    group.add(house.group, buildFurniture(cfg.furniture));
+    const furniture = buildFurniture(cfg.furniture);
+    group.add(house.group, furniture);
     scene.add(group);
-    return { cfg, group, floors: house.floors, cutaways: house.cutaways, windows: house.windows, index: i };
+    // TVs linked to a media_player: their screen lights up while it plays.
+    const screens = [];
+    furniture.children.forEach((g) => {
+      if (!g.userData.item?.entity) return;
+      g.traverse((o) => { if (o.userData.screen) screens.push({ entity: g.userData.item.entity, material: o.material }); });
+    });
+    return { cfg, group, floors: house.floors, cutaways: house.cutaways, windows: house.windows, alerts: house.alerts, screens, index: i };
   });
   const levelOf = (id) => levels.find((l) => l.cfg.id === id);
   const roomOf = (levelId, roomId) => levelOf(levelId)?.cfg.rooms.find((r) => r.id === roomId);
@@ -314,11 +321,17 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     if (running && !raf) { last = performance.now(); raf = requestAnimationFrame(frame); }
   }
 
+  // Idle showcase (wall tablet): a slow orbit, rendered at ~15 fps to stay cool.
+  let orbit = false;
+  const ORBIT_DEG_PER_S = 360 / 240;
+
   function frame(now) {
     raf = 0;
-    const dt = Math.min(0.05, (now - last) / 1000);
+    if (orbit && awake === 0 && now - last < 66) { raf = requestAnimationFrame(frame); return; }
+    const dt = Math.min(0.07, (now - last) / 1000);
     last = now;
-    const moving = updateRig(dt);
+    if (orbit) rig.goal.az += dt * ORBIT_DEG_PER_S;
+    const moving = updateRig(dt) || orbit;
     let active = moving;
     for (const u of units) active = u.update(dt) || active;
     if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; active = true; }
@@ -396,6 +409,23 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
 
     glowEntities: () => glows.entities(),
 
+    /** Entities behind the model's live details: contact sensors on openings, TVs. */
+    liveEntities: () => [...new Set(levels.flatMap((l) => [...l.alerts.map((a) => a.sensor), ...l.screens.map((x) => x.entity)]))],
+
+    /** stateOf(entity) → HA state object; open openings glow red, playing TVs light up. */
+    applyLive(stateOf) {
+      for (const l of levels) {
+        for (const a of l.alerts) a.mesh.visible = stateOf(a.sensor)?.state === 'on';
+        for (const x of l.screens) {
+          const st = stateOf(x.entity)?.state;
+          const on = st && !['off', 'unavailable', 'unknown', 'standby'].includes(st);
+          x.material.emissive.set(on ? '#7fb2ff' : '#27407a');
+          x.material.emissiveIntensity = on ? 1.6 : 0.35;
+        }
+      }
+      wake();
+    },
+
     // state(kind, cfg) → the unit's state; called on every hass update.
     applyStates(state, { instant = false } = {}) {
       for (const u of units) u.apply(state(u.kind, u.cfg), { instant });
@@ -423,6 +453,12 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
         }
       }
       return out;
+    },
+
+    setIdleOrbit(on) {
+      if (orbit === on) return;
+      orbit = on;
+      if (on) wake();
     },
 
     /** Screen position of a world point, or null when it is behind the camera. */

@@ -169,7 +169,33 @@ export function buildHouse(config, { plinth: withPlinth = true } = {}) {
     floors.push(rotatedRoom(room, config, group, wallMats, cutaways));
   }
 
-  return { group, floors, cutaways, windows };
+  // Openings linked to a contact sensor get a red frame that lights up (and blooms) when open.
+  const alerts = [];
+  const red = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff3b3b').multiplyScalar(3), toneMapped: false });
+  for (const o of config.openings.filter((x) => x.sensor)) {
+    const alongX = o.from[1] === o.to[1];
+    const [a, b] = alongX ? [Math.min(o.from[0], o.to[0]), Math.max(o.from[0], o.to[0])] : [Math.min(o.from[1], o.to[1]), Math.max(o.from[1], o.to[1])];
+    const c = alongX ? o.from[1] : o.from[0];
+    const y0 = o.type === 'window' ? o.sill : 0.02;
+    const y1 = Math.min(o.head, H);
+    const frameG = new THREE.Group();
+    const bar = (len, h, x, y) => {
+      const m = new THREE.Mesh(alongX ? new THREE.BoxGeometry(len, h, EXT_T + 0.08) : new THREE.BoxGeometry(EXT_T + 0.08, h, len), red);
+      m.position.set(alongX ? x : c, y, alongX ? c : x);
+      m.raycast = () => {};
+      frameG.add(m);
+    };
+    const t = 0.05;
+    bar(t, y1 - y0, a + t / 2, (y0 + y1) / 2);
+    bar(t, y1 - y0, b - t / 2, (y0 + y1) / 2);
+    bar(b - a, t, (a + b) / 2, y1 - t / 2);
+    bar(b - a, t, (a + b) / 2, y0 + t / 2);
+    frameG.visible = false;
+    group.add(frameG);
+    alerts.push({ sensor: o.sensor, mesh: frameG });
+  }
+
+  return { group, floors, cutaways, windows, alerts };
 }
 
 // A room turned about its centre: its own floor and four exterior walls (no openings),
