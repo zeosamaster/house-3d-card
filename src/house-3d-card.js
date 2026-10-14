@@ -4,7 +4,7 @@ import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups } from './hass-map.js';
 import './editor.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -270,7 +270,7 @@ class House3DCard extends LitElement {
             <span class="grow"></span>
             ${this._room ? nothing : html`<button class="chip icon ${this._showLabels ? 'on' : ''}" title="Room names"
               @click=${() => this._toggleLabels()}>Aa</button>`}
-            ${admin ? html`<button class="chip icon" title="Edit house" @click=${() => { this._editing = true; }}>✎</button>` : nothing}
+            ${admin ? html`<button class="chip icon" title="Edit house" @click=${() => this._openEditor()}>✎</button>` : nothing}
           </div>
           ${this._error ? html`<div class="error"><b>Can't show the house</b><p>${this._error}</p></div>` : nothing}
           ${!this._config.plan && plan && !this._room ? html`<div class="hint">Starter layout from your HA areas — tap ✎ to arrange the rooms.</div>` : nothing}
@@ -288,9 +288,16 @@ class House3DCard extends LitElement {
           </aside>` : nothing}
       </div>
       ${this._editing ? html`
-        <house-3d-editor .hass=${this.hass} .plan=${structuredClone(this._rawPlan)}
+        <house-3d-editor .hass=${this.hass} .plan=${this._editPlan}
           .save=${(p) => this._save(p)} @close=${() => { this._editing = false; }}></house-3d-editor>` : nothing}
     `;
+  }
+
+  // The editor works on one copy taken when it opens. Handing it a fresh clone on every
+  // render (hass updates re-render the card every few seconds) silently threw edits away.
+  _openEditor() {
+    this._editPlan = structuredClone(this._rawPlan);
+    this._editing = true;
   }
 
   _toggleLabels() {

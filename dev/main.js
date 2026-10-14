@@ -75,4 +75,11 @@ card.setConfig(dashboard.views[0].cards[0]);
 card.hass = hass;
 document.getElementById('root').append(card);
 window.card = card;
+
+// A real HA pushes a new hass object every few seconds (sensors tick); do the same so bugs that
+// only show under live updates (e.g. the editor losing edits) reproduce here.
+setInterval(() => {
+  const id = Object.keys(hass.states).find((e) => e.startsWith('sensor.'));
+  if (id) setState(id, String((Math.random() * 30).toFixed(1)));
+}, 1500);
 window.setState = setState;

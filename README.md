@@ -77,7 +77,7 @@ plan:
 Outdoor rooms (`outdoor: true`) have no walls and take `grass`, `deck`, `paving`, `tile`, `stone`, `water` or `soil`. A storey's `elevation` defaults to stacking on the one below.
 
 - **Rooms sharing an `area`** on a storey act as one room: no wall between them, one label, one room view. Use it for L-shapes and split zones.
-- **Furniture** includes a `car` (a Tesla Model Y-ish crossover, `color`), for the driveway.
+- **Furniture** includes a `car` (a Tesla Model Y-ish crossover, `color`), for the driveway. Any piece takes `scale` (e.g. `0.55`).
 - **`camera.azimuth`** sets the starting view (e.g. `-45` puts the house's +x side top-right).
 - **`rot`** (degrees) turns a room about its rect's centre. A rotated room builds its own four walls and ignores openings. Where it overlaps axis-aligned rooms, its floor wins; put `type: open` openings on their edges to drop walls it replaces.
 

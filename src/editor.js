@@ -71,6 +71,13 @@ class HouseEditor extends LitElement {
     return [b.minX - m, b.minZ - m, b.maxX - b.minX + m * 2, b.maxZ - b.minZ + m * 2];
   }
 
+  // Screen pixels per plan metre (the SVG letterboxes the viewBox: preserveAspectRatio meet).
+  _pxPerMetre(vb) {
+    const r = this.renderRoot.querySelector('svg.plan')?.getBoundingClientRect();
+    if (!r?.width) return 30;
+    return Math.min(r.width / vb[2], r.height / vb[3]);
+  }
+
   _point(ev) {
     const el = this.renderRoot.querySelector('svg.plan');
     const pt = el.createSVGPoint();
@@ -426,6 +433,7 @@ class HouseEditor extends LitElement {
           ${this._field('Width', item.width ?? '', (v) => { item.width = v || undefined; }, { type: 'number', step: STEP })}
         </div>
         ${this._field('Colour', item.color ?? '#8b93a7', (v) => { item.color = v; }, { type: 'color' })}
+        ${this._field('Scale', item.scale ?? 1, (v) => { item.scale = v && v !== 1 ? v : undefined; }, { type: 'number', step: 0.05 })}
         ${del}`;
     }
     return nothing;
@@ -467,7 +475,11 @@ class HouseEditor extends LitElement {
           : svg`<circle r="0.3" class="halo"/><circle r="0.17"/>`}</g>`)}
       ${this._sel?.kind === 'room' && lv.rooms[this._sel.index] && !lv.rooms[this._sel.index].rot ? (() => {
         const [x, z, w, d] = lv.rooms[this._sel.index].rect;
-        return svg`<circle class="handle" cx=${x + w} cy=${z + d} r="0.2" data-kind="resize" data-index=${this._sel.index}/>`;
+        // Sized in screen pixels, not metres: on a phone the whole plot is ~14 px/m, so a
+        // metre-sized dot was too small to grab. Invisible 22 px finger target + 8 px dot.
+        const m = 1 / this._pxPerMetre(vb);
+        return svg`<circle class="handle-hit" cx=${x + w} cy=${z + d} r=${22 * m} data-kind="resize" data-index=${this._sel.index}/>
+          <circle class="handle" cx=${x + w} cy=${z + d} r=${8 * m} stroke-width=${2 * m} data-kind="resize" data-index=${this._sel.index}/>`;
       })() : nothing}`;
   }
 
@@ -540,7 +552,8 @@ class HouseEditor extends LitElement {
     .light:not(.linked) circle, .light:not(.linked) rect { fill: #9a8a6a; }
     .light .halo { fill: rgba(255, 210, 122, 0.22); }
     .light.sel circle:not(.halo), .light.sel rect { stroke: #6f8cff; stroke-width: 0.06; }
-    .handle { fill: #6f8cff; stroke: #fff; stroke-width: 0.04; cursor: nwse-resize; }
+    .handle { fill: #6f8cff; stroke: #fff; cursor: nwse-resize; }
+    .handle-hit { fill: transparent; cursor: nwse-resize; }
     @media (max-width: 700px) { main { flex-direction: column; } aside { width: auto; height: 45%; border-left: 0; border-top: 1px solid #222a3d; } }
   `;
 }

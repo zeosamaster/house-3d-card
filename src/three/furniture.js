@@ -363,8 +363,14 @@ const builders = {
 
 export const FURNITURE_TYPES = Object.keys(builders);
 
-// Approximate [width, depth] of each piece, for the 2D plan editor.
+// Approximate [width, depth] of each piece, for the 2D plan editor; `scale` shrinks or grows it.
 export function footprint(item) {
+  const [w, d] = baseFootprint(item);
+  const s = item.scale || 1;
+  return [w * s, d * s];
+}
+
+function baseFootprint(item) {
   const w = item.width;
   switch (item.type) {
     case 'rug': return item.size || [2, 1.4];
@@ -401,6 +407,7 @@ export function buildFurniture(items) {
       continue;
     }
     const g = make(item);
+    if (item.scale) g.scale.setScalar(item.scale);
     g.position.set(item.pos[0], item.y || 0, item.pos[1]);
     g.rotation.y = THREE.MathUtils.degToRad(item.rot || 0);
     const flat = g.userData.flat;
