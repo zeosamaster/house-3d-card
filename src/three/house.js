@@ -22,10 +22,11 @@ function wallSegments(config) {
   for (const r of config.rooms) {
     if (r.outdoor || r.rot) continue; // gardens have no walls; rotated rooms build their own
     const area = r.area;
-    line('x', r.z).edges.push({ a: r.x, b: r.x + r.w, inside: 1, area });
-    line('x', r.z + r.d).edges.push({ a: r.x, b: r.x + r.w, inside: -1, area });
-    line('z', r.x).edges.push({ a: r.z, b: r.z + r.d, inside: 1, area });
-    line('z', r.x + r.w).edges.push({ a: r.z, b: r.z + r.d, inside: -1, area });
+    const room = r.id;
+    line('x', r.z).edges.push({ a: r.x, b: r.x + r.w, inside: 1, area, room });
+    line('x', r.z + r.d).edges.push({ a: r.x, b: r.x + r.w, inside: -1, area, room });
+    line('z', r.x).edges.push({ a: r.z, b: r.z + r.d, inside: 1, area, room });
+    line('z', r.x + r.w).edges.push({ a: r.z, b: r.z + r.d, inside: -1, area, room });
   }
   for (const o of config.openings) {
     const alongX = o.from[1] === o.to[1];
@@ -51,6 +52,7 @@ function wallSegments(config) {
         axis: l.axis, c: l.c, a: pts[i], b: pts[i + 1],
         kind: covering.length > 1 ? 'interior' : 'exterior',
         inside: covering[0].inside,
+        room: covering[0].room,
         opening: l.openings.find((o) => o.a < mid && mid < o.b) || null,
       };
       const prev = run[run.length - 1];
@@ -103,6 +105,12 @@ export function buildHouse(config, { plinth: withPlinth = true } = {}) {
     emissive: '#3d5fae', emissiveIntensity: 0.5,
   });
   const frame = mat('#2c3142', { rough: 0.6 });
+  // One glass material per room, so a lit room's windows can glow from outside at night.
+  const windows = new Map();
+  const glassFor = (room) => {
+    if (!windows.has(room)) windows.set(room, glass.clone());
+    return windows.get(room);
+  };
 
   // A wall piece running from a..b along its axis, between heights y0..y1.
   const piece = (parent, s, a, b, y0, y1, t, materials = wallMats) => {
@@ -146,7 +154,7 @@ export function buildHouse(config, { plinth: withPlinth = true } = {}) {
       const { sill, head } = s.opening;
       if (sill > 0.01) piece(full, s, a, b, 0, sill, t);
       piece(full, s, a, b, Math.min(head, H), H, t);
-      const pane = piece(full, s, a, b, sill, head, 0.03, glass);
+      const pane = piece(full, s, a, b, sill, head, 0.03, glassFor(s.room));
       pane.castShadow = false;
       const fw = 0.05;
       const bars = [[a, a + fw, sill, head], [b - fw, b, sill, head], [a, b, sill, sill + fw], [a, b, head - fw, head]];
@@ -161,7 +169,7 @@ export function buildHouse(config, { plinth: withPlinth = true } = {}) {
     floors.push(rotatedRoom(room, config, group, wallMats, cutaways));
   }
 
-  return { group, floors, cutaways };
+  return { group, floors, cutaways, windows };
 }
 
 // A room turned about its centre: its own floor and four exterior walls (no openings),
