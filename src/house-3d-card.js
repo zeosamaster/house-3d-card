@@ -1,11 +1,11 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { normalizePlan, planFromAreas, roomGroup } from './plan.js';
 import { createStage } from './stage.js';
-import { lampState, lampCaps, acState, areaGroups } from './hass-map.js';
+import { lampState, lampCaps, acState, areaGroups, isOn } from './hass-map.js';
 import { roomStatus, dockStatus, carStatus, fmt } from './status.js';
 import './editor.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -157,7 +157,8 @@ class House3DCard extends LitElement {
       <button class="pill ${st.open.length ? 'alert' : ''}" style="left:${l.x}px;top:${l.y}px" @click=${() => this._focus(l.id)}>
         ${this._showLabels ? html`<span class="name">${l.name}</span>` : nothing}
         ${this._showLabels && st.temp != null ? html`<span class="dim">${fmt(st.temp, '°')}</span>` : nothing}
-        ${st.lightsOn ? html`<span class="tag lit"><ha-icon icon="mdi:lightbulb-on"></ha-icon>${st.lightsOn > 1 ? st.lightsOn : ''}</span>` : nothing}
+        ${st.lightsOn ? html`<span class="tag lit tap" title="Turn this room's lights off"
+          @click=${(e) => { e.stopPropagation(); this._switchLights(this._lampEntities(level, l.id), l.name); }}><ha-icon icon="mdi:lightbulb-on"></ha-icon>${st.lightsOn > 1 ? st.lightsOn : ''}</span>` : nothing}
         ${ac ? html`<span class="tag ${ac.mode === 'heat' ? 'heat' : 'cool'}"><ha-icon icon=${ac.mode === 'heat' ? 'mdi:fire' : ac.mode === 'dry' ? 'mdi:water-percent' : ac.mode === 'fan_only' ? 'mdi:fan' : 'mdi:snowflake'}></ha-icon>${ac.target != null ? fmt(ac.target, '°') : ''}</span>` : nothing}
         ${st.open.length ? html`<span class="tag open"><ha-icon icon=${st.open.some((o) => o.kind === 'door') ? 'mdi:door-open' : 'mdi:window-open-variant'}></ha-icon>${st.open.length > 1 ? st.open.length : ''}</span>` : nothing}
       </button>`;
@@ -176,6 +177,25 @@ class House3DCard extends LitElement {
         ${d.battery ? html`<button class="dk" @click=${info(d.battery.entity)}><ha-icon icon=${d.battery.value > 80 ? 'mdi:battery-high' : d.battery.value > 30 ? 'mdi:battery-medium' : 'mdi:battery-low'}></ha-icon>${fmt(d.battery.value, '%')}</button>` : nothing}
         ${d.load ? html`<button class="dk" @click=${info(d.load.entity)}><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon>${fmt(d.load.value, ` ${d.load.unit}`)}</button>` : nothing}
       </div>`;
+  }
+
+  _roomLightsButton() {
+    const level = this._plan.levels.find((l) => l.id === this._room.level);
+    const lamps = this._lampEntities(level, this._room.id);
+    if (!lamps.length) return nothing;
+    const lit = this._litOf(lamps).length;
+    return html`<button class="roomlights ${lit ? 'on' : ''}" @click=${() => this._switchLights(lamps, this._room.name)}>
+      <ha-icon icon=${lit ? 'mdi:lightbulb-group' : 'mdi:lightbulb-group-outline'}></ha-icon>
+      <span>${lit ? `${lit} of ${lamps.length} on` : 'All off'}</span><span class="grow"></span><span class="sw">${lit ? 'Turn off' : 'Turn on'}</span>
+    </button>`;
+  }
+
+  _allOff() {
+    const all = this._lampEntities();
+    const lit = this._litOf(all).length;
+    if (!lit) return nothing;
+    return html`<button class="chip lit" title="Turn off every light" @click=${() => this._switchLights(all, 'House')}>
+      <ha-icon icon="mdi:lightbulb-group-off-outline"></ha-icon>${lit}</button>`;
   }
 
   _carChip() {
@@ -229,10 +249,38 @@ class House3DCard extends LitElement {
     this.dispatchEvent(new CustomEvent('hass-more-info', { detail: { entityId }, bubbles: true, composed: true }));
   }
 
-  _say(text) {
-    this._toast = text;
+  _say(text, action = null, ms = 4000) {
+    this._toast = { text, action };
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { this._toast = null; }, 4000);
+    this._toastTimer = setTimeout(() => { this._toast = null; }, ms);
+  }
+
+  /* ---------- quick control ---------- */
+
+  _lampEntities(level = null, roomId = null) {
+    const levels = level ? [level] : this._plan.levels;
+    const ids = roomId ? new Set(roomGroup(level, roomId).map((r) => r.id)) : null;
+    return [...new Set(levels.flatMap((l) => l.lights).filter((x) => x.entity && (!ids || ids.has(x.room))).map((x) => x.entity))];
+  }
+
+  _litOf(entities) { return entities.filter((e) => isOn(this.hass.states[e])); }
+
+  // Turn off what's on (remembering it in a throwaway scene so it can be undone), or turn
+  // everything on when nothing is.
+  async _switchLights(entities, label) {
+    const lit = this._litOf(entities);
+    haptic();
+    if (!lit.length) {
+      await this.hass.callService('homeassistant', 'turn_on', { entity_id: entities }).catch((e) => this._say(e.message));
+      return;
+    }
+    let undo = null;
+    try {
+      await this.hass.callService('scene', 'create', { scene_id: 'house_3d_undo', snapshot_entities: lit });
+      undo = () => { haptic(); this.hass.callService('scene', 'turn_on', { entity_id: 'scene.house_3d_undo' }); this._toast = null; };
+    } catch { /* no undo for users who can't create scenes */ }
+    await this.hass.callService('homeassistant', 'turn_off', { entity_id: lit }).catch((e) => this._say(e.message));
+    this._say(`${label}: ${lit.length} ${lit.length === 1 ? 'light' : 'lights'} off`, undo && { label: 'Undo', run: undo }, 8000);
   }
 
   /* ---------- room sheet: HA's own tile cards ---------- */
@@ -330,13 +378,15 @@ class House3DCard extends LitElement {
               ${levels.length > 1 ? levels.map((l) => html`
                 <button class="chip ${this._peel === l.id ? 'on' : ''}" @click=${() => this._setPeel(l.id)}>${l.name}</button>`) : nothing}`}
             <span class="grow"></span>
+            ${!this._room && this.hass && this._plan ? this._allOff() : nothing}
             ${this._room ? nothing : html`<button class="chip icon ${this._showLabels ? 'on' : ''}" title="Room names"
               @click=${() => this._toggleLabels()}>Aa</button>`}
             ${admin ? html`<button class="chip icon" title="Edit house" @click=${() => this._openEditor()}>✎</button>` : nothing}
           </div>
           ${this._error ? html`<div class="error"><b>Can't show the house</b><p>${this._error}</p></div>` : nothing}
           ${!this._config.plan && plan && !this._room ? html`<div class="hint">Starter layout from your HA areas — tap ✎ to arrange the rooms.</div>` : nothing}
-          ${this._toast ? html`<div class="toast">${this._toast}</div>` : nothing}
+          ${this._toast ? html`<div class="toast">${this._toast.text}${this._toast.action ? html`
+            <button class="act" @click=${() => this._toast.action.run()}>${this._toast.action.label}</button>` : nothing}</div>` : nothing}
         </div>
         ${this._room ? html`
           <aside class="sheet">
@@ -344,6 +394,7 @@ class House3DCard extends LitElement {
               <h2>${this._room.name}</h2>
               ${temp || hum ? html`<span class="climate">${[temp, hum].filter(Boolean).join(' · ')}</span>` : nothing}
             </header>
+            ${this._roomLightsButton()}
             ${sheet?.note ? html`<p class="note">${sheet.note}</p>` : nothing}
             ${!sheet ? html`<p class="note">Loading…</p>` : nothing}
             ${sheet?.groups.map((g) => html`<h3>${g.title}</h3><div class="tiles">${g.cards}</div>`)}
@@ -416,6 +467,17 @@ class House3DCard extends LitElement {
     .error { top: 30%; border: 1px solid #e05252; }
     .error p { margin: 6px 0 0; white-space: pre-wrap; }
     .hint { bottom: 56px; }
+    .toast { display: flex; align-items: center; gap: 12px; }
+    .toast .act { font: inherit; font-weight: 600; color: #8fb3ff; background: none; border: 0; cursor: pointer; padding: 2px 4px; }
+    .chip.lit { display: inline-flex; align-items: center; gap: 4px; color: #ffd27a; }
+    .chip.lit ha-icon { --mdc-icon-size: 16px; width: 16px; height: 16px; display: inline-flex; }
+    .tag.tap { cursor: pointer; border-radius: 999px; padding: 1px 3px; margin: -1px -3px; }
+    .tag.tap:hover { background: rgba(255, 210, 122, 0.2); }
+    .roomlights { display: flex; align-items: center; gap: 8px; width: 100%; font: inherit; font-size: 14px; color: var(--primary-text-color);
+      background: var(--secondary-background-color, #262a33); border: 0; border-radius: 12px; padding: 12px 14px; margin: 4px 0 10px; cursor: pointer; }
+    .roomlights.on { background: linear-gradient(90deg, rgba(255, 196, 102, 0.28), rgba(255, 196, 102, 0.1)); }
+    .roomlights.on ha-icon { color: #ffc466; }
+    .roomlights .sw { font-weight: 600; opacity: 0.8; }
     .toast { bottom: 54px; }
     .sheet { width: 380px; flex: none; overflow-y: auto; background: var(--card-background-color, #1c1f26); padding: 12px 12px 24px; box-sizing: border-box; }
     .sheet header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -434,6 +496,11 @@ class House3DCard extends LitElement {
       .sheet { width: auto; flex: 1; }
     }
   `;
+}
+
+// A short tick on phones that support it (Android Companion app); silent elsewhere.
+function haptic() {
+  try { navigator.vibrate?.(12); } catch { /* not supported */ }
 }
 
 // Per-viewer UI preferences; storage can be unavailable (private mode, previews).

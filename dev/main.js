@@ -30,6 +30,7 @@ if (ac) states[ac] = { ...states[ac], state: 'cool', attributes: { ...states[ac]
 const win = Object.keys(states).find((e) => e.startsWith('binary_sensor.') && ['window', 'door'].includes(states[e].attributes.device_class));
 if (win) states[win] = { ...states[win], state: 'on' };
 
+const scenes = {};
 let hass = {
   states,
   entities: Object.fromEntries(fixture.entities.map((e) => [e.entity_id, { entity_id: e.entity_id, area_id: e.area_id }])),
@@ -38,10 +39,23 @@ let hass = {
   floors: Object.fromEntries(fixture.floors.map((f) => [f.floor_id, f])),
   user: { is_admin: true, name: 'dev' },
   callService: async (domain, service, data) => {
-    const id = data.entity_id;
-    const st = hass.states[id];
-    log(`${domain}.${service} ${id}`);
-    if (service === 'toggle' && st) setState(id, st.state === 'on' ? 'off' : 'on');
+    const ids = [data.entity_id ?? []].flat();
+    log(`${domain}.${service} ${ids.join(', ')}`);
+    if (domain === 'scene' && service === 'create') {
+      scenes[data.scene_id] = Object.fromEntries(data.snapshot_entities.map((e) => [e, hass.states[e].state]));
+      return;
+    }
+    if (domain === 'scene' && service === 'turn_on') {
+      for (const [e, st] of Object.entries(scenes[ids[0].replace('scene.', '')] || {})) setState(e, st);
+      return;
+    }
+    for (const id of ids) {
+      const st = hass.states[id];
+      if (!st) continue;
+      if (service === 'toggle') setState(id, st.state === 'on' ? 'off' : 'on');
+      if (service === 'turn_on') setState(id, 'on');
+      if (service === 'turn_off') setState(id, 'off');
+    }
   },
   callWS: async (msg) => {
     if (msg.type === 'lovelace/config' && msg.url_path === 'dashboard-areas') return areasDashboard;
