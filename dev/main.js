@@ -31,6 +31,12 @@ if (ac) states[ac] = { ...states[ac], state: 'cool', attributes: { ...states[ac]
 const opened = Object.keys(states).filter((e) => e.startsWith('binary_sensor.') && ['window', 'door'].includes(states[e].attributes.device_class))
   .filter((e) => /sala_mesa|w6_cozinha/.test(e));
 for (const e of opened.length ? opened : Object.keys(states).filter((x) => states[x].attributes?.device_class === 'window').slice(0, 1)) states[e] = { ...states[e], state: 'on' };
+// The pool light on, blue (its colour tints the water at night).
+const pool = Object.keys(states).find((e) => e.startsWith('light.') && /piscina/.test(e) && !/^light\.piscina$/.test(e));
+if (pool) states[pool] = { ...states[pool], state: 'on', attributes: { ...states[pool].attributes, color_mode: 'xy', rgb_color: [30, 140, 255], brightness: 255 } };
+// ?weather=cloudy etc.
+const wx = new URLSearchParams(location.search).get('weather');
+if (wx) setTimeout(() => setState('weather.dev', wx), 0);
 const tv = Object.keys(states).find((e) => e.startsWith('media_player.') && /tv/.test(e));
 if (tv) states[tv] = { ...states[tv], state: 'on' };
 

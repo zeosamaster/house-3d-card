@@ -2,10 +2,10 @@ import { LitElement, html, css, nothing } from 'lit';
 import { normalizePlan, planFromAreas, roomGroup } from './plan.js';
 import { createStage } from './stage.js';
 import { lampState, lampCaps, acState, areaGroups, isOn } from './hass-map.js';
-import { roomStatus, dockStatus, carStatus, fmt } from './status.js';
+import { roomStatus, dockStatus, carStatus, fmt, heatColor, cloudOf, roomTemp } from './status.js';
 import './editor.js';
 
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 const TYPE = 'custom:house-3d-card';
 
 class House3DCard extends LitElement {
@@ -22,12 +22,14 @@ class House3DCard extends LitElement {
     _showLabels: { state: true },
     _carAt: { state: true },
     _sheetBig: { state: true },
+    _heat: { state: true },
   };
 
   constructor() {
     super();
     this._labels = [];
     this._showLabels = readPref('labels') === '1';
+    this._heat = readPref('heat') === '1';
     this._tiles = new Map();
     this._watched = new Map();
     this._onHash = () => this._fromHash();
@@ -113,6 +115,7 @@ class House3DCard extends LitElement {
     }
     this._glowIds = null;
     this._liveIds = null;
+    this._heatKey = undefined;
     this._syncHouse(true);
     this._syncLive(true);
     this._poke();
@@ -171,16 +174,28 @@ class House3DCard extends LitElement {
     this._carAt = car && !this._room ? this._stage.project([car.pos[0], lv.elevation + 1.9 * (car.scale || 1), car.pos[1]]) : null;
   }
 
+  // Pills that would overlap (small phone screens) are nudged down; ~84×24 px each.
+  _spread(labels) {
+    const placed = [];
+    return [...labels].sort((a, b) => a.y - b.y).map((l) => {
+      let y = l.y;
+      for (const p of placed) if (Math.abs(p.x - l.x) < 84 && Math.abs(p.y - y) < 24) y = p.y + 24;
+      placed.push({ x: l.x, y });
+      return { ...l, y };
+    });
+  }
+
   // One pill per room: its name (when names are on) plus what's going on in it right now.
   _roomPill(l) {
     const level = this._plan.levels.find((x) => x.id === l.level);
     const st = roomStatus(this.hass, level, l.id);
-    if (!this._showLabels && !st.busy) return nothing;
+    const showTemp = st.temp != null && (this._showLabels || this._heat);
+    if (!this._showLabels && !st.busy && !showTemp) return nothing;
     const ac = st.acs[0];
     return html`
       <button class="pill ${st.open.length ? 'alert' : ''}" style="left:${l.x}px;top:${l.y}px" @click=${() => this._focus(l.id)}>
         ${this._showLabels ? html`<span class="name">${l.name}</span>` : nothing}
-        ${this._showLabels && st.temp != null ? html`<span class="dim">${fmt(st.temp, '°')}</span>` : nothing}
+        ${showTemp ? html`<span class=${this._heat ? 'temp' : 'dim'} style=${this._heat ? `color: rgb(${heatColor(st.temp).join(',')})` : ''}>${fmt(st.temp, '°')}</span>` : nothing}
         ${st.lightsOn ? html`<span class="tag lit tap" title="Turn this room's lights off"
           @click=${(e) => { e.stopPropagation(); this._switchLights(this._lampEntities(level, l.id), l.name); }}><ha-icon icon="mdi:lightbulb-on"></ha-icon>${st.lightsOn > 1 ? st.lightsOn : ''}</span>` : nothing}
         ${ac ? html`<span class="tag ${ac.mode === 'heat' ? 'heat' : 'cool'}"><ha-icon icon=${ac.mode === 'heat' ? 'mdi:fire' : ac.mode === 'dry' ? 'mdi:water-percent' : ac.mode === 'fan_only' ? 'mdi:fan' : 'mdi:snowflake'}></ha-icon>${ac.target != null ? fmt(ac.target, '°') : ''}</span>` : nothing}
@@ -236,10 +251,40 @@ class House3DCard extends LitElement {
     if (!this._stage || !this.hass) return;
     const sun = this.hass.states[this._config.sun ?? 'sun.sun'];
     if (sun) this._stage.setSun(Number(sun.attributes.elevation ?? -30), Number(sun.attributes.azimuth ?? 180));
+    const weather = this.hass.states[this._config.status?.weather ?? Object.keys(this.hass.states).find((e) => e.startsWith('weather.'))];
+    if (weather) this._stage.setWeather(cloudOf(weather.state));
+    this._syncHeat();
     const ids = this._glowIds ??= this._stage.glowEntities();
     if (!force && ids.every((e) => this._glowSeen?.get(e) === this.hass.states[e])) return;
     this._glowSeen = new Map(ids.map((e) => [e, this.hass.states[e]]));
     this._stage.applyGlows((cfg) => lampState(this.hass.states[cfg.entity]));
+  }
+
+  // Temperature layer: each indoor room's floor tinted by its temperature (when switched on).
+  _syncHeat() {
+    if (!this._stage) return;
+    if (!this._heat) {
+      if (this._heatKey !== null) { this._stage.setHeat(null); this._heatKey = null; }
+      return;
+    }
+    const colors = {};
+    for (const level of this._plan.levels) {
+      for (const r of level.rooms.filter((x) => !x.outdoor)) {
+        const group = roomGroup(level, r.id);
+        const c = heatColor(roomTemp(this.hass, level, new Set(group.map((g) => g.id)), r.area));
+        if (c) colors[r.id] = c;
+      }
+    }
+    const key = JSON.stringify(colors);
+    if (key === this._heatKey) return;
+    this._heatKey = key;
+    this._stage.setHeat(colors);
+  }
+
+  _toggleHeat() {
+    this._heat = !this._heat;
+    writePref('heat', this._heat ? '1' : '0');
+    this._syncHeat();
   }
 
   // Contact sensors on openings and TVs: only when one of them changed.
@@ -401,7 +446,7 @@ class House3DCard extends LitElement {
       <div class="wrap ${this._room ? 'has-sheet' : ''}" style="height:${this._config.height || 'calc(100vh - var(--header-height, 56px) - 16px)'}">
         <div class="stage">
           <div class="canvas"></div>
-          ${this._room || !this.hass ? nothing : this._labels.map((l) => this._roomPill(l))}
+          ${this._room || !this.hass ? nothing : this._spread(this._labels).map((l) => this._roomPill(l))}
           ${this._room || !this.hass ? nothing : this._carChip()}
           ${this._room || !this.hass ? nothing : this._dock()}
           <div class="bar">
@@ -413,6 +458,8 @@ class House3DCard extends LitElement {
                 <button class="chip ${this._peel === l.id ? 'on' : ''}" @click=${() => this._setPeel(l.id)}>${l.name}</button>`) : nothing}`}
             <span class="grow"></span>
             ${!this._room && this.hass && this._plan ? this._allOff() : nothing}
+            ${this._room ? nothing : html`<button class="chip icon ${this._heat ? 'on' : ''}" title="Temperatures"
+              @click=${() => this._toggleHeat()}><ha-icon icon="mdi:thermometer"></ha-icon></button>`}
             ${this._room ? nothing : html`<button class="chip icon ${this._showLabels ? 'on' : ''}" title="Room names"
               @click=${() => this._toggleLabels()}>Aa</button>`}
             ${admin ? html`<button class="chip icon" title="Edit house" @click=${() => this._openEditor()}>✎</button>` : nothing}
@@ -482,6 +529,8 @@ class House3DCard extends LitElement {
     .tag { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; }
     .tag ha-icon, .dk ha-icon, .pill ha-icon { --mdc-icon-size: 15px; width: 15px; height: 15px; display: inline-flex; }
     .tag.lit { color: #ffd27a; }
+    .pill .temp { font-weight: 700; }
+    .chip.icon ha-icon { --mdc-icon-size: 16px; width: 16px; height: 16px; display: inline-flex; vertical-align: -3px; }
     .tag.cool { color: #7cc4ff; }
     .tag.heat { color: #ff9a5a; }
     .tag.open { color: #ff7b7b; }

@@ -12,6 +12,8 @@ import { ACUnit } from './three/ac.js';
 import { roomGroup, boundsOf } from './plan.js';
 import { createSky } from './sky.js';
 import { createGlows } from './glow.js';
+import { lampState } from './hass-map.js';
+import { lightColor } from './three/lights.js';
 
 export const STAGE_BG = '#0a0e1a';
 const rad = THREE.MathUtils.degToRad;
@@ -56,7 +58,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
       if (!g.userData.item?.entity) return;
       g.traverse((o) => { if (o.userData.screen) screens.push({ entity: g.userData.item.entity, material: o.material }); });
     });
-    return { cfg, group, floors: house.floors, cutaways: house.cutaways, windows: house.windows, alerts: house.alerts, screens, index: i };
+    const glowFloors = house.glowFloors.map((g) => ({ ...g, base: g.material.emissive.clone(), baseI: g.material.emissiveIntensity }));
+    return { cfg, group, floors: house.floors, cutaways: house.cutaways, windows: house.windows, alerts: house.alerts, screens, glowFloors, index: i };
   });
   const levelOf = (id) => levels.find((l) => l.cfg.id === id);
   const roomOf = (levelId, roomId) => levelOf(levelId)?.cfg.rooms.find((r) => r.id === roomId);
@@ -83,6 +86,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
 
   /* ---------- view state ---------- */
 
+  const heat = new Map(); // roomId → temperature-layer overlay
+  let lastLive = null;   // last applyLive state getter, re-run when day turns to night
   let peel = null;  // house view: hide storeys above this one (null = whole house)
   let room = null;  // room view: { level, id, ids } — ids: every rect of the room's area
   let units = [];   // LightUnit / ACUnit of the focused room
@@ -397,6 +402,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     setSun(elevation, azimuth) {
       if (!sky.update({ elevation, azimuth, dim: Boolean(room) })) return;
       glows.setDaylight(sky.daylight);
+      if (lastLive) this.applyLive(lastLive);
       shadowFrames = 3;
       wake();
     },
@@ -410,7 +416,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     glowEntities: () => glows.entities(),
 
     /** Entities behind the model's live details: contact sensors on openings, TVs. */
-    liveEntities: () => [...new Set(levels.flatMap((l) => [...l.alerts.map((a) => a.sensor), ...l.screens.map((x) => x.entity)]))],
+    liveEntities: () => [...new Set(levels.flatMap((l) => [...l.alerts.map((a) => a.sensor), ...l.screens.map((x) => x.entity), ...l.glowFloors.map((g) => g.entity)]))],
 
     /** stateOf(entity) → HA state object; open openings glow red, playing TVs light up. */
     applyLive(stateOf) {
@@ -421,6 +427,48 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
           const on = st && !['off', 'unavailable', 'unknown', 'standby'].includes(st);
           x.material.emissive.set(on ? '#7fb2ff' : '#27407a');
           x.material.emissiveIntensity = on ? 1.6 : 0.35;
+        }
+        // A floor lit by a light (the pool's water): its colour, strongest at night.
+        for (const g of l.glowFloors) {
+          const st = lampState(stateOf(g.entity));
+          const night = 1 - sky.daylight;
+          if (!st.on || night < 0.05) { g.material.emissive.copy(g.base); g.material.emissiveIntensity = g.baseI; continue; }
+          lightColor(st, g.material.emissive);
+          g.material.emissiveIntensity = g.baseI + (0.6 + 1.4 * (st.brightness ?? 1)) * night;
+        }
+      }
+      lastLive = stateOf;
+      wake();
+    },
+
+    /** Cloud cover 0..1 (from the weather entity). */
+    setWeather(cloud) {
+      if (!sky.update({ cloud, dim: Boolean(room) })) return;
+      shadowFrames = 3;
+      wake();
+    },
+
+    /** roomId → [r, g, b] tints the room's floor (temperature layer); null hides the layer. */
+    setHeat(colors) {
+      for (const l of levels) {
+        for (const r of l.cfg.rooms.filter((x) => !x.outdoor)) {
+          let o = heat.get(r.id);
+          const c = colors?.[r.id];
+          if (!c) { if (o) o.visible = false; continue; }
+          if (!o) {
+            o = new THREE.Mesh(new THREE.PlaneGeometry(r.w, r.d),
+              new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5, depthWrite: false, toneMapped: false }));
+            o.rotation.x = -Math.PI / 2;
+            const holder = new THREE.Group();
+            holder.position.set(r.x + r.w / 2, 0.02, r.z + r.d / 2);
+            holder.rotation.y = rad(r.rot || 0);
+            holder.add(o);
+            o.raycast = () => {};
+            l.group.add(holder);
+            heat.set(r.id, o);
+          }
+          o.material.color.setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace);
+          o.visible = true;
         }
       }
       wake();

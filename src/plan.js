@@ -37,6 +37,7 @@ export function normalizePlan(raw) {
       return {
         id: r.id, name: r.name || r.id, area: r.area || null, x, z, w, d, rot, ...aabb(x, z, w, d, rot),
         outdoor: Boolean(r.outdoor), floor: r.floor || (r.outdoor ? 'grass' : 'oak'),
+        glow: r.glow || null, // a light whose colour tints this floor at night (e.g. the pool's water)
       };
     });
     const roomIds = new Set(rooms.map((r) => r.id));
