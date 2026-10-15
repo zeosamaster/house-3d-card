@@ -1,6 +1,7 @@
 // The whole-house view's lamps: a bright bulb (picked up by the bloom pass) and an additive
 // pool of light on the floor under every lamp that is on, tinted and scaled by its live state.
-// No real three.js lights — 47 of those would sink a phone.
+// No real three.js lights — 47 of those would sink a phone. Lamps ease on (quicker) and off
+// (slower) rather than pop, and on first load they come on one after another.
 import * as THREE from 'three';
 import { lightColor } from './three/lights.js';
 import { roomGroup } from './plan.js';
@@ -53,7 +54,7 @@ export function createGlows(levels, H) {
       for (const m of [bulb, spot]) { m.visible = false; m.raycast = () => {}; group.add(m); }
       if (cfg.type === 'strip') bulb.scale.set(Math.max(1, (cfg.length ?? 1) / 0.1), 1, 1);
       bulb.rotation.y = THREE.MathUtils.degToRad(cfg.rot || 0);
-      all.push({ cfg, bulb, spot, hidden: false, state: null });
+      all.push({ cfg, bulb, spot, hidden: false, state: null, lit: null, k: 0, delay: 0 });
     }
   }
 
@@ -71,8 +72,8 @@ export function createGlows(levels, H) {
   const warm = new THREE.Color('#ffb46a');
   function paintWindows() {
     for (const p of panes) {
-      const on = p.lamps.filter((g) => g.state?.on);
-      const level = on.length ? Math.max(...on.map((g) => g.state.brightness ?? 1)) : 0;
+      const on = p.lamps.filter((g) => g.k > 0.005 && g.lit);
+      const level = on.length ? Math.max(...on.map((g) => g.k * (g.lit.brightness ?? 1))) : 0;
       const night = 1 - daylight;
       if (!level || night < 0.05) {
         p.material.emissive.copy(p.base);
@@ -81,20 +82,22 @@ export function createGlows(levels, H) {
         continue;
       }
       // Warm, bright enough to bloom: a lit room seen from the garden at night.
-      lightColor({ temp: 2900, ...on[0].state }, tmp).lerp(warm, 0.4);
+      lightColor({ temp: 2900, ...on[0].lit }, tmp).lerp(warm, 0.4);
       p.material.emissive.copy(tmp);
       p.material.emissiveIntensity = (0.9 + 1.6 * level) * night + p.baseI * (1 - night);
       p.material.opacity = p.baseO + (0.55 - p.baseO) * night;
     }
   }
 
+  const goal = (g) => (g.state?.on && !g.hidden ? 1 : 0);
+
   function paint(g) {
-    const s = g.state;
-    const on = Boolean(s?.on) && !g.hidden;
+    const s = g.lit; // the last "on" state: a fading lamp keeps its colour
+    const on = g.k > 0.005 && Boolean(s);
     g.bulb.visible = on;
     g.spot.visible = on;
     if (!on) return;
-    const level = s.brightness ?? 1;
+    const level = (s.brightness ?? 1) * g.k;
     lightColor({ temp: 3000, ...s }, tmp);
     // Hot enough to bloom at night; by day the bulb reads but the pool all but vanishes.
     g.bulb.material.color.copy(tmp).multiplyScalar(1.2 + 3 * level * (1 - 0.6 * daylight));
@@ -103,13 +106,39 @@ export function createGlows(levels, H) {
 
   return {
     /** state(cfg) → { on, brightness, temp, color } */
-    apply(state) {
-      for (const g of all) { g.state = state(g.cfg); paint(g); }
+    apply(state, { stagger = false } = {}) {
+      let i = 0;
+      for (const g of all) {
+        g.state = state(g.cfg);
+        if (g.state?.on) g.lit = g.state;
+        if (stagger && g.state?.on) g.delay = 0.35 + 0.05 * i++;
+        paint(g);
+      }
       paintWindows();
     },
-    /** Lamps shown by real lights instead (the focused room's). */
+    /** Lamps shown by real lights instead (the focused room's): those switch at once. */
     hide(ids) {
-      for (const g of all) { g.hidden = ids.has(g.cfg.id); paint(g); }
+      for (const g of all) {
+        g.hidden = ids.has(g.cfg.id);
+        if (g.hidden) g.k = 0;
+        paint(g);
+      }
+      paintWindows();
+    },
+    /** Eases every lamp towards on/off; true while any is still changing. */
+    update(dt) {
+      let busy = false;
+      for (const g of all) {
+        const t = goal(g);
+        if (g.k === t) continue;
+        busy = true;
+        if (g.delay > 0) { g.delay -= dt; continue; }
+        g.k += (t - g.k) * (1 - Math.exp(-dt * (t > g.k ? 7 : 4)));
+        if (Math.abs(t - g.k) < 0.01) g.k = t;
+        paint(g);
+      }
+      if (busy) paintWindows();
+      return busy;
     },
     setDaylight(d) {
       daylight = d;
