@@ -7,7 +7,7 @@ import { strings } from './i18n.js';
 import { loadHistory, stateAt, sunPosition, skyGradient } from './replay.js';
 import './editor.js';
 
-const VERSION = '0.18.0';
+const VERSION = '0.19.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -752,7 +752,16 @@ class House3DCard extends LitElement {
     .clock .sub .warn { color: #ffbf7a; }
     .clock ha-icon { --mdc-icon-size: 1.2em; width: 1.2em; height: 1.2em; display: inline-flex; }
     @keyframes fadein { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-    .wrap .bar, .wrap .pill { transition: opacity 0.8s ease; }
+    .wrap .bar { transition: opacity 0.8s ease; }
+    /* Press feedback: a quick squeeze and a springy release. The independent scale property
+       leaves the pills' centring transform alone. */
+    button { -webkit-tap-highlight-color: transparent; }
+    .chip, .dk, .avatar, .fab, .act, .rp-live { transition: scale 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    .wrap .pill { transition: opacity 0.8s ease, scale 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    .chip:active, .pill:active, .dk:active, .avatar:active, .fab:active, .act:active, .rp-live:active { scale: 0.92; transition-duration: 0.08s; }
+    .canvas canvas { animation: appear 0.9s ease both; }
+    @keyframes appear { from { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .chip, .dk, .avatar, .fab, .act, .rp-live, .wrap .pill { transition: none; } }
     .wrap.ambient .bar, .wrap.ambient .pill, .wrap.ambient .fab { opacity: 0; pointer-events: none; }
     .replay { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; align-items: center; gap: 10px; padding: 8px 12px;
       background: rgba(10, 14, 26, 0.78); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; backdrop-filter: blur(8px); color: #eef1f8; }

@@ -426,6 +426,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     if (moving) { ao.enabled = false; settled = false; } else if (!settled) { settled = true; ao.enabled = true; awake = Math.max(awake, 1); }
     let active = moving;
     for (const u of units) active = u.update(dt) || active;
+    active = glows.update(dt) || active;
     if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; active = true; }
     if (active || awake > 0) {
       composer.render(dt);
@@ -457,7 +458,10 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   rig.zoom = homeZoom();
   frameGoal();
   updateRig(0, true);
-  if (intro) {
+  // Reduced motion: no fly-in and no idle orbit (fades stay).
+  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  let firstGlows = intro && !still; // the first time, the lamps come on one by one
+  if (intro && !still) {
     // First load: start high and swung round, then ease down into the view.
     rig.az = rig.goal.az - 50;
     rig.el = Math.min(EL_MAX, rig.goal.el + 22);
@@ -518,7 +522,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
 
     // state(cfg) → { on, brightness, temp, color } for every lamp's house-view glow.
     applyGlows(state) {
-      glows.apply(state);
+      glows.apply(state, { stagger: firstGlows });
+      firstGlows = false;
       wake();
     },
 
@@ -615,6 +620,7 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     },
 
     setIdleOrbit(on) {
+      if (still) on = false;
       if (orbit === on) return;
       orbit = on;
       if (on) wake();
