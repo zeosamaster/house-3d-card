@@ -101,7 +101,7 @@ let hass = {
 
 function setState(id, state, userId = 'u-dev') {
   const st = hass.states[id];
-  hass = { ...hass, states: { ...hass.states, [id]: { ...st, state, context: { user_id: userId } } } };
+  hass = { ...hass, states: { ...hass.states, [id]: { ...st, state, last_changed: new Date().toISOString(), context: { user_id: userId } } } };
   card.hass = hass;
 }
 
