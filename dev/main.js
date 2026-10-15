@@ -19,7 +19,7 @@ states['sun.sun'] = { entity_id: 'sun.sun', state: sunEl > 0 ? 'above_horizon' :
 const add = (entity_id, state, attributes = {}) => { states[entity_id] = { entity_id, state, attributes }; };
 add('weather.dev', 'partlycloudy', { temperature: 21.5, friendly_name: 'Weather', wind_speed: Number(new URLSearchParams(location.search).get('wind') ?? 14), wind_speed_unit: 'km/h' });
 add('person.dev_a', 'home', { friendly_name: 'Fabio' });
-add('person.dev_b', 'not_home', { friendly_name: 'Sara' });
+add('person.dev_b', 'not_home', { friendly_name: 'Sara', user_id: 'u-sara' });
 add('sensor.dev_solar', '2.4', { unit_of_measurement: 'kW', device_class: 'power' });
 add('sensor.dev_battery', '76', { unit_of_measurement: '%', device_class: 'battery' });
 add('sensor.dev_load', '1.3', { unit_of_measurement: 'kW', device_class: 'power' });
@@ -50,7 +50,7 @@ let hass = {
   devices: {},
   areas: Object.fromEntries(fixture.areas.map((a) => [a.area_id, a])),
   floors: Object.fromEntries(fixture.floors.map((f) => [f.floor_id, f])),
-  user: { is_admin: true, name: 'dev' },
+  user: { is_admin: true, name: 'dev', id: 'u-dev' },
   config: { latitude: 38.95, longitude: -9.07 },
   locale: { language: new URLSearchParams(location.search).get('lang') || 'en' },
   callService: async (domain, service, data) => {
@@ -99,9 +99,9 @@ let hass = {
   },
 };
 
-function setState(id, state) {
+function setState(id, state, userId = 'u-dev') {
   const st = hass.states[id];
-  hass = { ...hass, states: { ...hass.states, [id]: { ...st, state } } };
+  hass = { ...hass, states: { ...hass.states, [id]: { ...st, state, context: { user_id: userId } } } };
   card.hass = hass;
 }
 
@@ -149,6 +149,7 @@ card.setConfig(dashboard.views[0].cards[0]);
 card.hass = hass;
 document.getElementById('root').append(card);
 window.card = card;
+window.setState = setState; // tests: setState(id, state, userId)
 
 // A real HA pushes a new hass object every few seconds (sensors tick); do the same so bugs that
 // only show under live updates (e.g. the editor losing edits) reproduce here.

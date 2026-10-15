@@ -33,6 +33,7 @@ With no `plan` yet, the card lays out a rough starter house from your HA floors 
 | Lights bar in a room's sheet | All of the room's lamps on / off |
 | Storey chips | Pick the storey to show (starts on the ground floor; the top one shows the whole house) |
 | **Aa** | Show / hide room names (off by default, remembered per device) |
+| 💬 | Who did what: when someone switches a lamp, AC or TV from the HA app or a dashboard, a short note says so ("Sara · Candeeiro Sala · Off"). Automations, sensors, wall switches and your own taps stay quiet |
 | 🌧 | Alive: trees sway with the weather entity's real wind speed, the pool's surface drifts, and when HA says it rains, rain falls on the garden (not through the open rooms). Honours *reduce motion* |
 | ⏱ | Time machine: replays the last 24 h in ~24 s — lamps, open doors/windows and TVs from HA's recorder, and the sun moving across the sky (computed from the home's location). Scrub the timeline (its track is the day's sky), **Live** returns |
 | 🌡 | Temperature layer: every room's floor tinted cold-blue → comfortable-green → amber → hot-red, temperatures in the pills (area's temperature sensor, else any in the area, else its AC's reading; outdoors only an explicitly chosen area sensor) |

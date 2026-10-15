@@ -7,7 +7,7 @@ import { strings } from './i18n.js';
 import { loadHistory, stateAt, sunPosition, skyGradient } from './replay.js';
 import './editor.js';
 
-const VERSION = '0.19.0';
+const VERSION = '0.20.0';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -503,6 +503,30 @@ class House3DCard extends LitElement {
     this.dispatchEvent(new CustomEvent('hass-more-info', { detail: { entityId }, bubbles: true, composed: true }));
   }
 
+  // "Sara · Candeeiro Sala · Off": what someone else just switched from an app or dashboard.
+  // Only changes carrying a user (context.user_id) count: automations, sensors and wall
+  // switches stay quiet, and so do this viewer's own taps.
+  _announce() {
+    if (!this._plan) return;
+    if (this._annPlan !== this._plan) {
+      this._annPlan = this._plan;
+      this._annIds = [...new Set(this._plan.levels.flatMap((l) => [...l.lights, ...l.acs, ...l.furniture]
+        .map((d) => d.entity).filter(Boolean)))];
+      this._annSeen = null;
+    }
+    const prev = this._annSeen;
+    this._annSeen = new Map(this._annIds.map((e) => [e, this.hass.states[e]]));
+    if (!prev || this._replay) return;
+    const changed = this._annIds.map((e) => [prev.get(e), this.hass.states[e]])
+      .filter(([was, st]) => was && st && was.state !== st.state && st.context?.user_id && st.context.user_id !== this.hass.user?.id);
+    if (!changed.length) return;
+    const st = changed[0][1];
+    const person = Object.values(this.hass.states).find((p) => p.entity_id.startsWith('person.') && p.attributes.user_id === st.context.user_id);
+    const who = person?.attributes.friendly_name?.split(' ')[0];
+    const what = `${st.attributes.friendly_name || st.entity_id} · ${this.hass.formatEntityState?.(st) ?? st.state}`;
+    this._say([who, what, changed.length > 1 ? `+${changed.length - 1}` : ''].filter(Boolean).join(' · '), null, 3500);
+  }
+
   _say(text, action = null, ms = 4000) {
     this._toast = { text, action };
     clearTimeout(this._toastTimer);
@@ -606,6 +630,7 @@ class House3DCard extends LitElement {
     if (this._dirty && this.hass && this.isConnected) this._build();
     if (changed.has('hass') && this.hass) {
       this._syncStates();
+      this._announce();
       // Only the open sheet's tiles get live state.
       for (const g of this._sheet?.groups || []) for (const el of g.cards) el.hass = this.hass;
       if (this._room && this._sheet?.note === this._t.areaGone && this.hass.areas?.[this._room.area]) this._loadSheet();
