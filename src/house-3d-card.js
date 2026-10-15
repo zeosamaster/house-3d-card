@@ -7,7 +7,7 @@ import { strings } from './i18n.js';
 import { loadHistory, stateAt, sunPosition, skyGradient } from './replay.js';
 import './editor.js';
 
-const VERSION = '0.20.0';
+const VERSION = '0.20.1';
 let introPlayed = false; // once per page load, not per element (HA recreates cards on reloads)
 const TYPE = 'custom:house-3d-card';
 
@@ -68,6 +68,7 @@ class House3DCard extends LitElement {
     if (!secs) return;
     this._idleTimer = setTimeout(() => {
       if (this._room || this._editing || document.hidden) return;
+      if (this._replay) this._stopReplay(); // never orbit yesterday under a live clock
       this._stage?.setIdleOrbit(true);
       // Ambient mode (wall tablets): the controls fade away and a big clock takes the sky.
       if (this._config?.ambient !== false) this._ambient = true;
@@ -78,6 +79,10 @@ class House3DCard extends LitElement {
     super.connectedCallback();
     this._onPoke ??= () => this._poke();
     for (const ev of ['pointerdown', 'wheel', 'keydown']) this.addEventListener(ev, this._onPoke, { passive: true });
+    // In ambient mode the first touch only wakes the card: it never reaches the 3D view (which
+    // would open a room) — the hidden bar buttons ignore it via CSS.
+    this._onWake ??= (e) => { if (this._ambient) { e.stopPropagation(); this._poke(); } };
+    this.addEventListener('pointerdown', this._onWake, { capture: true });
     window.addEventListener('popstate', this._onHash);
     document.addEventListener('visibilitychange', this._onVisibility);
     this._resizeObs ??= new ResizeObserver(() => { this._stage?.resize(); this._updateLabels(); });
@@ -91,6 +96,11 @@ class House3DCard extends LitElement {
     super.disconnectedCallback();
     clearTimeout(this._idleTimer);
     for (const ev of ['pointerdown', 'wheel', 'keydown']) this.removeEventListener(ev, this._onPoke);
+    this.removeEventListener('pointerdown', this._onWake, { capture: true });
+    this._play(false);
+    this._ambient = false;
+    clearInterval(this._clockTick);
+    this._clockTick = null;
     window.removeEventListener('popstate', this._onHash);
     document.removeEventListener('visibilitychange', this._onVisibility);
     this._stage?.setRunning(false);
@@ -206,7 +216,7 @@ class House3DCard extends LitElement {
     // The car chip floats above the first car in the plan.
     const lv = this._plan.levels.find((l) => l.furniture.some((f) => f.type === 'car'));
     const car = lv?.furniture.find((f) => f.type === 'car');
-    const at = car && !this._room ? this._stage.project([car.pos[0], lv.elevation + 1.9 * (car.scale || 1), car.pos[1]]) : null;
+    const at = car && !this._room ? this._stage.project([car.pos[0], lv.elevation + 1.9 * (car.scale || 1), car.pos[1]], 36) : null; // hidden near the edges rather than clipped
     if (Math.round(at?.x) !== Math.round(this._carAt?.x) || Math.round(at?.y) !== Math.round(this._carAt?.y)) this._carAt = at;
   }
 
@@ -222,9 +232,17 @@ class House3DCard extends LitElement {
     const d = this._dockMemo?.d || dockStatus(this.hass, this._statusCfg());
     const home = d.people?.filter((p) => p.home).map((p) => p.name.split(' ')[0]);
     // The house in one line: what's open (or that it's all shut) and how many lights are on.
-    const rooms = this._labels.map((l) => ({ name: l.name, st: this._statusOf(this._plan.levels.find((x) => x.id === l.level), l.id) }));
-    const open = rooms.filter((r) => r.st.open.length).map((r) => r.name);
-    const lit = rooms.reduce((n, r) => n + r.st.lightsOn, 0);
+    // Every storey, one entry per area (not just the rooms labelled in the current view).
+    const open = new Set();
+    for (const lv of this._plan.levels) {
+      const seen = new Set();
+      for (const r of lv.rooms) {
+        if (seen.has(r.area || r.id)) continue;
+        seen.add(r.area || r.id);
+        if (this._statusOf(lv, r.id).open.length) open.add(r.name);
+      }
+    }
+    const lit = this._litOf(this._lampEntities()).length;
     return html`<div class="clock">
       <div class="time">${time}</div>
       <div class="date">${date}</div>
@@ -233,7 +251,7 @@ class House3DCard extends LitElement {
         ${home?.length ? html`<span><ha-icon icon="mdi:home-heart"></ha-icon>${home.join(' · ')}</span>` : nothing}
       </div>
       <div class="sub">
-        ${open.length ? html`<span class="warn"><ha-icon icon="mdi:door-open"></ha-icon>${open.join(' · ')}</span>`
+        ${open.size ? html`<span class="warn"><ha-icon icon="mdi:door-open"></ha-icon>${[...open].join(' · ')}</span>`
           : html`<span><ha-icon icon="mdi:shield-home-outline"></ha-icon>${this._t.allShut}</span>`}
         ${lit ? html`<span><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon>${this._t.lightsOnN(lit)}</span>` : nothing}
       </div>
@@ -261,7 +279,7 @@ class House3DCard extends LitElement {
 
   _seek(t) {
     const r = this._replay;
-    if (!r?.history) return;
+    if (!r?.history || !this._stage) return;
     r.t = Math.min(r.end, Math.max(r.start, t));
     const { latitude = 38.7, longitude = -9.1 } = this.hass.config || {};
     const sun = sunPosition(r.t, latitude, longitude);
@@ -271,7 +289,7 @@ class House3DCard extends LitElement {
     this._replay = { ...r };
   }
 
-  // 24 hours in ~24 seconds; stops at "now".
+  // 24 hours in ~24 seconds (480 ticks of 50 ms); stops at "now".
   _play(on) {
     clearInterval(this._replayTimer);
     if (!this._replay) return;
@@ -281,7 +299,7 @@ class House3DCard extends LitElement {
     this._replayTimer = setInterval(() => {
       const r = this._replay;
       if (!r) return clearInterval(this._replayTimer);
-      const next = r.t + 60 * 1000 * 1.25; // 75 s of house per 50 ms tick
+      const next = r.t + (r.end - r.start) / 480;
       this._seek(next);
       if (next >= r.end) this._play(false);
     }, 50);
@@ -290,6 +308,7 @@ class House3DCard extends LitElement {
   _stopReplay() {
     clearInterval(this._replayTimer);
     this._replay = null;
+    this._skyTrack = null;
     this._glowSeen = null;
     this._liveSeen = null;
     this._syncHouse(true);
@@ -310,7 +329,7 @@ class House3DCard extends LitElement {
           style="background:${this._skyTrack}" @input=${(e) => { this._play(false); this._seek(Number(e.target.value)); }}>
       </div>
       <span class="rp-time">${r.loading ? this._t.loading : when}</span>
-      <button class="rp-live" @click=${() => { this._skyTrack = null; this._stopReplay(); }}>${this._t.live}</button>
+      <button class="rp-live" @click=${() => this._stopReplay()}>${this._t.live}</button>
     </div>`;
   }
 
@@ -518,7 +537,8 @@ class House3DCard extends LitElement {
     this._annSeen = new Map(this._annIds.map((e) => [e, this.hass.states[e]]));
     if (!prev || this._replay) return;
     const changed = this._annIds.map((e) => [prev.get(e), this.hass.states[e]])
-      .filter(([was, st]) => was && st && was.state !== st.state && st.context?.user_id && st.context.user_id !== this.hass.user?.id);
+      .filter(([was, st]) => was && st && was.state !== st.state && st.context?.user_id && st.context.user_id !== this.hass.user?.id
+        && Date.now() - Date.parse(st.last_changed) < 30000);
     if (!changed.length) return;
     const st = changed[0][1];
     const person = Object.values(this.hass.states).find((p) => p.entity_id.startsWith('person.') && p.attributes.user_id === st.context.user_id);
@@ -788,6 +808,7 @@ class House3DCard extends LitElement {
     @keyframes appear { from { opacity: 0; } }
     @media (prefers-reduced-motion: reduce) { .chip, .dk, .avatar, .fab, .act, .rp-live, .wrap .pill { transition: none; } }
     .wrap.ambient .bar, .wrap.ambient .pill, .wrap.ambient .fab { opacity: 0; pointer-events: none; }
+    .wrap.ambient .bar > * { pointer-events: none; }
     .replay { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; align-items: center; gap: 10px; padding: 8px 12px;
       background: rgba(10, 14, 26, 0.78); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; backdrop-filter: blur(8px); color: #eef1f8; }
     .rp-btn { width: 38px; height: 38px; border-radius: 50%; border: 0; background: #e9eefb; color: #0a0e1a; display: grid; place-items: center; cursor: pointer; flex: none; }
@@ -822,8 +843,9 @@ class House3DCard extends LitElement {
     .note { color: var(--secondary-text-color); }
     @media (max-width: 500px) {
       .title.home { display: none; }
-      .bar { gap: 5px; padding: 8px; }
-      .chip { padding: 5px 10px; }
+      .bar { gap: 4px; padding: 8px; }
+      .chip { padding: 5px 9px; font-size: 12px; }
+      .chip.icon { padding: 4px 7px; }
       .dk { font-size: 12px; padding: 3px 8px; }
       .dock { gap: 4px; left: 8px; bottom: 8px; }
     }

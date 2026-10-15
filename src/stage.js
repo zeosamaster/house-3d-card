@@ -37,7 +37,8 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   renderer.shadowMap.autoUpdate = false; // static model: shadow maps only when something changes
 
   // Android drops WebGL contexts under memory pressure; three restores its state, we redraw.
-  canvas.addEventListener('webglcontextrestored', () => { shadowFrames = 3; wake(4); });
+  // The PMREM environment was rendered on the GPU, so it is rebuilt too.
+  canvas.addEventListener('webglcontextrestored', () => { makeEnvironment(); shadowFrames = 3; wake(4); });
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(STAGE_BG);
@@ -78,9 +79,12 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   scene.add(plinth);
 
   // Image-based lighting: soft reflections and fill on every material; scaled with daylight.
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  pmrem.dispose();
+  function makeEnvironment() {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+  }
+  makeEnvironment();
   const envFor = (d) => 0.08 + 0.2 * d;
 
   // Light comes from the real sun (sun.sun) by day and a soft moon at night; see sky.js.
@@ -404,14 +408,26 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
   let orbit = false;
   const ORBIT_DEG_PER_S = 360 / 240;
 
+  let ambling = false; // last frame only lamps fading / units animating: 30 fps is plenty
+
   function frame(now) {
     raf = 0;
-    // the orbit alone draws ~15 fps; rain ~25
-    if ((orbit || life.busy) && awake === 0 && now - last < (life.busy ? 40 : 66)) { raf = requestAnimationFrame(frame); return; }
-    const gap = now - last;
+    // the orbit alone draws ~15 fps, rain ~25, fades and AC airflow ~30
+    const minGap = life.busy ? 40 : orbit ? 66 : ambling ? 33 : 0;
+    if (minGap && awake === 0 && now - last < minGap) { raf = requestAnimationFrame(frame); return; }
+    const gap = Math.max(0, now - last); // rAF's timestamp can precede a wake()'s now()
     const dt = Math.min(0.07, gap / 1000);
     last = now;
-    if (!orbit && !life.busy) { // a chain of back-to-back frames: the view is moving
+    if (orbit) rig.goal.az += dt * ORBIT_DEG_PER_S;
+    const camMoving = updateRig(dt);
+    const moving = camMoving || orbit || life.busy;
+    life.tick(dt);
+    let animating = false;
+    for (const u of units) animating = u.update(dt) || animating;
+    animating = glows.update(dt) || animating;
+    // Sample only the camera's own back-to-back frames; a gap over 100 ms is a one-off stall
+    // (shader compile, sheet build), not a slow device.
+    if (camMoving && !orbit && !life.busy && gap < 100) {
       slow.ema = slow.ema * 0.9 + gap * 0.1;
       if (++slow.n > 40 && slow.ema > 30 && maxPR > 1) {
         maxPR = Math.max(1, maxPR - 0.3);
@@ -419,21 +435,17 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
         resize();
       }
     }
-    if (orbit) rig.goal.az += dt * ORBIT_DEG_PER_S;
-    const moving = updateRig(dt) || orbit || life.busy;
-    life.tick(dt);
-    // AO on the frame after things settle (and only then).
-    if (moving) { ao.enabled = false; settled = false; } else if (!settled) { settled = true; ao.enabled = true; awake = Math.max(awake, 1); }
-    let active = moving;
-    for (const u of units) active = u.update(dt) || active;
-    active = glows.update(dt) || active;
+    // AO only on the frame after everything settles, never while anything moves or animates.
+    if (moving || animating) { ao.enabled = false; settled = false; } else if (!settled) { settled = true; ao.enabled = true; awake = Math.max(awake, 1); }
+    let active = moving || animating;
+    ambling = animating && !moving;
     if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; active = true; }
     if (active || awake > 0) {
       composer.render(dt);
       awake = Math.max(0, awake - 1);
       if (moving || awake === 0) onMove?.();
     }
-    if (running && (active || awake > 0)) raf = requestAnimationFrame(frame);
+    if (running && (active || awake > 0) && !raf) raf = requestAnimationFrame(frame);
   }
 
   function resize() {
@@ -627,11 +639,13 @@ export function createStage(canvas, plan, { onPick, onLongPress, onMove, capsOf,
     },
 
     /** Screen position of a world point, or null when it is behind the camera. */
-    project([x, y, z]) {
+    /** Screen position of a world point; null behind the camera or within `margin` px of an edge. */
+    project([x, y, z], margin = -Infinity) {
       camera.updateMatrixWorld();
       v.set(x, y, z).project(camera);
       if (v.z > 1) return null;
-      return { x: (v.x * 0.5 + 0.5) * width, y: (-v.y * 0.5 + 0.5) * height };
+      const p = { x: (v.x * 0.5 + 0.5) * width, y: (-v.y * 0.5 + 0.5) * height };
+      return p.x < margin || p.y < margin || p.x > width - margin || p.y > height - margin ? null : p;
     },
 
     acView(id) {
